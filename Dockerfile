@@ -27,5 +27,6 @@ RUN mkdir -p /app/templates
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Europe/Helsinki
 
-# Oletuskomento (voit ajaa jomman kumman skriptin manuaalisesti)
-CMD ["python", "./automaatti_haku.py" "./app.py"]
+# Käynnistä sovellus
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]  # Oleta, että päämoduuli on app.py
+Tarkista:
