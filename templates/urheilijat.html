@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Urheilijat{% endblock %}
+
+{% block content %}
+<h2>Kaikki urheilijat</h2>
+
+<form method="get" action="{{ url_for('listaa_urheilijat') }}" class="search-form mb-4">
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label for="sukupuoli" class="form-label">Sukupuoli</label>
+            <select id="sukupuoli" name="sukupuoli" class="form-select">
+                <option value="">Kaikki</option>
+                <option value="M" {% if sukupuoli == 'M' %}selected{% endif %}>Miehet</option>
+                <option value="N" {% if sukupuoli == 'N' %}selected{% endif %}>Naiset</option>
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label for="ika_min" class="form-label">Ikä vähintään</label>
+            <input type="number" id="ika_min" name="ika_min" class="form-control" 
+                   value="{{ ika_min if ika_min is not none }}" min="0" max="120">
+        </div>
+        <div class="col-md-4">
+            <label for="ika_max" class="form-label">Ikä enintään</label>
+            <input type="number" id="ika_max" name="ika_max" class="form-control" 
+                   value="{{ ika_max if ika_max is not none }}" min="0" max="120">
+        </div>
+        <div class="col-12">
+            <button type="submit" class="btn btn-primary">Suodata</button>
+            <a href="{{ url_for('listaa_urheilijat') }}" class="btn btn-secondary">Nollaa suodattimet</a>
+        </div>
+    </div>
+</form>
+
+{% if urheilijat %}
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Nimi</th>
+                    <th>Sukupuoli</th>
+                    <th>Ikä</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for urheilija in urheilijat %}
+                    <tr>
+                        <td>
+                            <a href="{{ url_for('hae_urheilijan_tulokset', nimi=urheilija['etunimi'] + ' ' + urheilija['sukunimi']) }}">
+                                {{ urheilija['etunimi'] }} {{ urheilija['sukunimi'] }}
+                            </a>
+                        </td>
+                        <td>
+                            {% if urheilija['sukupuoli'] %}
+                                {% if urheilija['sukupuoli'].upper() == 'M' %}Mies{% else %}Nainen{% endif %}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+						<td>
+							{% if urheilija['syntymavuosi'] %}
+								{{ current_year - urheilija['syntymavuosi'] }}v
+							{% else %}
+								-
+							{% endif %}
+						</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% else %}
+    <div class="alert alert-warning">Ei urheilijoita annetuilla suodattimilla.</div>
+{% endif %}
+{% endblock %}

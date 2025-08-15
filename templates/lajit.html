@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Lajit{% endblock %}
+
+{% block content %}
+<h2>Kaikki lajit</h2>
+
+{% if lajit %}
+    <div class="row">
+        {% for laji in lajit %}
+            <div class="col-md-4 mb-3">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ laji['lajin_nimi'] }}</h5>
+                        <a href="{{ url_for('hae_lajin_parhaat_tulokset', laji=laji['lajin_nimi']) }}" class="btn btn-sm btn-primary">
+                            Näytä parhaat tulokset
+                        </a>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="alert alert-warning">Ei lajeja tietokannassa.</div>
+{% endif %}
+{% endblock %}

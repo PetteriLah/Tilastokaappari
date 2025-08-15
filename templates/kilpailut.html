@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Kilpailut{% endblock %}
+
+{% block content %}
+<h2>Kilpailut</h2>
+
+{% if kilpailut %}
+    <div class="list-group">
+        {% for kilpailu in kilpailut %}
+            <a href="{{ url_for('nayta_kilpailun_tulokset', kilpailu_id=kilpailu['kilpailu_id']) }}" class="list-group-item list-group-item-action">
+                <div class="d-flex w-100 justify-content-between">
+                    <h5 class="mb-1">{{ kilpailu['kilpailun_nimi'] }}</h5>
+                    <small>{{ kilpailu['alkupvm'] }}</small>
+                </div>
+            </a>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="alert alert-warning">Ei kilpailuja tietokannassa.</div>
+{% endif %}
+{% endblock %}

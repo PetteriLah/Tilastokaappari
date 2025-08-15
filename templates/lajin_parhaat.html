@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Lajin {{ laji }} parhaat tulokset{% endblock %}
+
+{% block content %}
+<h2>Lajin {{ laji }} parhaat tulokset</h2>
+
+<form method="get" action="{{ url_for('hae_lajin_parhaat_tulokset') }}" class="search-form">
+    <input type="hidden" name="laji" value="{{ laji }}">
+    
+    <div class="row g-3">
+        <div class="col-md-3">
+            <label for="sukupuoli" class="form-label">Sukupuoli</label>
+            <select id="sukupuoli" name="sukupuoli" class="form-select">
+                <option value="">Kaikki</option>
+                <option value="M" {% if sukupuoli == 'M' %}selected{% endif %}>Miehet</option>
+                <option value="N" {% if sukupuoli == 'N' %}selected{% endif %}>Naiset</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label for="ika_min" class="form-label">Ikä vähintään</label>
+            <input type="number" id="ika_min" name="ika_min" class="form-control" value="{{ ika_min if ika_min is not none }}">
+        </div>
+        <div class="col-md-3">
+            <label for="ika_max" class="form-label">Ikä enintään</label>
+            <input type="number" id="ika_max" name="ika_max" class="form-control" value="{{ ika_max if ika_max is not none }}">
+        </div>
+        <div class="col-md-3">
+            <label for="vuosi" class="form-label">Kilpailuvuosi</label>
+            <select id="vuosi" name="vuosi" class="form-select">
+                <option value="">Kaikki vuodet</option>
+                {% for v in vuodet %}
+                    <option value="{{ v }}" {% if vuosi == v|int %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-12">
+            <button type="submit" class="btn btn-primary">Suodata</button>
+            <a href="{{ url_for('hae_lajin_parhaat_tulokset', laji=laji) }}" class="btn btn-secondary">Nollaa suodattimet</a>
+        </div>
+    </div>
+</form>
+
+{% if tulokset %}
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Nimi</th>
+                    <th>Seura</th>
+                    <th>Tulos</th>
+                    <th>Kilpailu</th>
+                    <th>Päivämäärä</th>
+                    <th>Sijoitus</th>
+                    <th>Ikä</th>
+                    <th>Sukupuoli</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tulos in tulokset %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <<td><a href="{{ url_for('hae_urheilijan_tulokset', nimi=tulos['etunimi']~' '~tulos['sukunimi']) }}">
+						{{ tulos['etunimi'] }} {{ tulos['sukunimi'] }}</a></td>
+                        <td>{{ tulos['seura'] }}</td>
+                        <td>{{ tulos['tulos'] }}</td>
+                        <td>{{ tulos['kilpailun_nimi'] }}</td>
+                        <td>{{ tulos['alkupvm'] }}</td>
+                        <td>{{ tulos['sijoitus'] }}</td>
+                        <td>
+                            {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
+                                {{ tulos['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if tulos['sukupuoli'] %}
+                                {% if tulos['sukupuoli'].upper() == 'M' %}Mies{% else %}Nainen{% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% else %}
+    <div class="alert alert-warning">Ei tuloksia annetulla lajinimellä ja suodattimilla.</div>
+{% endif %}
+{% endblock %}

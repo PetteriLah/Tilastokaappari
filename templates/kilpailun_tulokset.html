@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}{{ kilpailu['kilpailun_nimi'] }}{% endblock %}
+
+{% block content %}
+<h2>{{ kilpailu['kilpailun_nimi'] }} <small class="text-muted">{{ kilpailu['alkupvm'] }}</small></h2>
+
+{% if lajit %}
+    {% for laji in lajit %}
+        <div class="card mb-4">
+            <div class="card-header">
+                <h3>{{ laji['lajin_nimi'] }} <small class="text-muted">{{ laji['sarja'] if laji['sarja'] else '' }}</small></h3>
+            </div>
+            <div class="card-body">
+                {% if tulokset[laji['laji_id']] %}
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Sija</th>
+                                    <th>Nimi</th>
+                                    <th>Seura</th>
+                                    <th>Tulos</th>
+                                    <th>Ikä</th>
+                                    <th>Sukupuoli</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for tulos in tulokset[laji['laji_id']] %}
+                                    <tr>
+                                        <td>{{ tulos['sijoitus'] }}</td>
+                                        <td><a href="{{ url_for('hae_urheilijan_tulokset', nimi=tulos['etunimi']~' '~tulos['sukunimi']) }}">
+											{{ tulos['etunimi'] }} {{ tulos['sukunimi'] }}  </a></td>
+                                        <td>{{ tulos['seura'] }}</td>
+                                        <td>{{ tulos['tulos'] }}</td>
+                                        <td>
+                                            {% if tulos['syntymavuosi'] and kilpailu['alkupvm'] %}
+                                                {{ kilpailu['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if tulos['sukupuoli'] %}
+                                                {% if tulos['sukupuoli'].upper() == 'M' %}Mies{% else %}Nainen{% endif %}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="alert alert-info">Ei tuloksia tälle lajille.</div>
+                {% endif %}
+            </div>
+        </div>
+    {% endfor %}
+{% else %}
+    <div class="alert alert-warning">Ei lajeja tälle kilpailulle.</div>
+{% endif %}
+{% endblock %}
