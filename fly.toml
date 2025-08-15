@@ -1,15 +1,18 @@
-app = "sinun-sovelluksesi-nimi"  # Anna uniikki nimi
+app = "tilastokaappari"
 
 [build]
   dockerfile = "Dockerfile"
 
 [http_service]
-  internal_port = 8080
+  internal_port = 8080  # Fly.io:n sisäinen portti
   force_https = true
   auto_stop_machines = true
   auto_start_machines = true
   min_machines_running = 0
 
+[env]
+  PORT = "8080"  # Kerrotaan sovellukselle kuunneltava portti
+
 [[mounts]]
-  source = "data_volume"
+  source = "tilastokaappari_data"
   destination = "/app/data"
