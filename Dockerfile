@@ -28,5 +28,4 @@ ENV PYTHONUNBUFFERED=1
 ENV TZ=Europe/Helsinki
 
 # Käynnistä sovellus
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]  # Oleta, että päämoduuli on app.py
-Tarkista:
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]  
