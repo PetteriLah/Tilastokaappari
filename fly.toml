@@ -4,7 +4,7 @@ app = "sinun-sovelluksesi-nimi"  # Anna uniikki nimi
   dockerfile = "Dockerfile"
 
 [http_service]
-  internal_port = 5000
+  internal_port = 8080
   force_https = true
   auto_stop_machines = true
   auto_start_machines = true
