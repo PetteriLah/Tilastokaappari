@@ -426,21 +426,15 @@ def listaa_lajit():
     return render_template('lajit.html', lajit=lajit)
 
 if __name__ == '__main__':
-    # Hae portti ympäristömuuttujasta tai käytä oletusarvoa 5000
-    port = int(os.environ.get('PORT', 5000))
+    # Hae portti ympäristömuuttujasta (Fly.io käyttää 8080)
+    port = int(os.environ.get("PORT", 8080))  # Muutettu oletusportti 5000 -> 8080
     
-    # Tarkista tietokannan olemassaolo ja alusta tarvittaessa
+    # Varmista että tietokanta on olemassa
     if not os.path.exists(DATABASE_FILE):
-        print("Tietokantaa ei löydy! Yritetään luoda tietokanta...")
-        try:
-            if update_database():
-                print("Tietokanta luotu onnistuneesti!")
-            else:
-                print("Tietokannan luonti epäonnistui")
-                exit(1)
-        except Exception as e:
-            print(f"Tietokannan luontiprosessi epäonnistui: {str(e)}")
+        print("Tietokantaa ei löydy! Alustetaan...")
+        if not update_database():
+            print("Tietokannan alustus epäonnistui")
             exit(1)
     
     # Käynnistä sovellus
-    app.run(host='0.0.0.0', port=port, debug=False)  # Muista debug=False tuotannossa!
+    app.run(host='0.0.0.0', port=port, debug=False)  # Varmista debug=False
