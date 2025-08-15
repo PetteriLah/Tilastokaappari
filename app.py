@@ -426,22 +426,21 @@ def listaa_lajit():
     return render_template('lajit.html', lajit=lajit)
 
 if __name__ == '__main__':
+    # Hae portti ympäristömuuttujasta tai käytä oletusarvoa 5000
+    port = int(os.environ.get('PORT', 5000))
+    
     # Tarkista tietokannan olemassaolo ja alusta tarvittaessa
     if not os.path.exists(DATABASE_FILE):
-        print("Tietokantaa ei löydy! Yritetään luoda tietokanta automaatti_haku.py:llä...")
+        print("Tietokantaa ei löydy! Yritetään luoda tietokanta...")
         try:
-            result = subprocess.run(['python', 'automaatti_haku.py'], 
-                                  capture_output=True, text=True)
-            if result.returncode == 0:
+            if update_database():
                 print("Tietokanta luotu onnistuneesti!")
-                # Kirjaa päivitysaika
-                with open(LAST_UPDATE_FILE, 'w') as f:
-                    f.write(datetime.now().isoformat())
             else:
-                print(f"Tietokannan luonti epäonnistui: {result.stderr}")
+                print("Tietokannan luonti epäonnistui")
                 exit(1)
         except Exception as e:
             print(f"Tietokannan luontiprosessi epäonnistui: {str(e)}")
             exit(1)
     
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    # Käynnistä sovellus
+    app.run(host='0.0.0.0', port=port, debug=False)  # Muista debug=False tuotannossa!
