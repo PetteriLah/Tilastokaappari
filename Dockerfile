@@ -8,24 +8,19 @@ RUN apt-get update && \
     gcc \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
-# Luo data-hakemisto
-RUN mkdir -p /app/data
 
-# Kopioi molemmat Python-skriptit
-COPY requirements.txt .
-COPY tulosten_haku.py .
+# Luo tarvittavat hakemistot
+RUN mkdir -p /app/data && mkdir -p /app/templates
+
+# Kopioi kaikki tiedostot
 COPY . .
-# Asenna Python-riippuvuudet
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir beautifulsoup4 requests tabulate
 
-# Luo data-hakemisto
-RUN mkdir -p /app/data
-RUN mkdir -p /app/templates
+# Asenna Python-riippuvuudet
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Ympäristömuuttujat
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Europe/Helsinki
 
-# Käynnistä sovellus
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]  
+# Suorita Flask-sovellus
+CMD python app.py
