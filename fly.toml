@@ -7,10 +7,6 @@ app = "tilastokaappari"
   internal_port = 8080
   force_https = true
 
-[env]
-  PORT = "8080"
-  FLY_APP_NAME = "tilastokaappari"
-  
 [[mounts]]
-  source = "tilastokaappari_data"  # Käytä täsmälleen tätä muotoa
+  source = "tilastokaappari_data"
   destination = "/app/data"
