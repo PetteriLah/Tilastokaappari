@@ -426,8 +426,8 @@ def listaa_lajit():
     return render_template('lajit.html', lajit=lajit)
 
 if __name__ == '__main__':
-    # Hae portti ympäristömuuttujasta (Fly.io käyttää 8080)
-    port = int(os.environ.get("PORT", 8080))  # Muutettu oletusportti 5000 -> 8080
+    # Hae portti ympäristömuuttujasta
+    port = int(os.environ.get("PORT", 8080))
     
     # Varmista että tietokanta on olemassa
     if not os.path.exists(DATABASE_FILE):
@@ -436,5 +436,30 @@ if __name__ == '__main__':
             print("Tietokannan alustus epäonnistui")
             exit(1)
     
-    # Käynnistä sovellus
-    app.run(host='0.0.0.0', port=port, debug=False)  # Varmista debug=False
+    # Käytä Gunicornia tuotantoympäristössä
+    if os.environ.get("FLY_APP_NAME"):
+        # Fly.io-ympäristössä - käytä Gunicornia
+        from gunicorn.app.base import BaseApplication
+        
+        class FlaskApplication(BaseApplication):
+            def __init__(self, app, options=None):
+                self.application = app
+                self.options = options or {}
+                super().__init__()
+            
+            def load_config(self):
+                for key, value in self.options.items():
+                    self.cfg.set(key, value)
+            
+            def load(self):
+                return self.application
+        
+        options = {
+            'bind': '0.0.0.0:8080',
+            'workers': 2,
+            'timeout': 120
+        }
+        FlaskApplication(app, options).run()
+    else:
+        # Paikallisessa kehitysympäristössä - käytä Flaskin palvelinta
+        app.run(host='0.0.0.0', port=port, debug=True)
