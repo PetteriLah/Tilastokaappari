@@ -1,0 +1,28 @@
+# Python-tiedostot
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Kehitysympäristöt
+venv/
+.env/
+.venv/
+
+# IDE-tiedostot
+.vscode/
+.idea/
+
+# Testit ja dokumentaatio
+tests/
+docs/
+*.log
+
+# Versionhallinta
+.git/
+.gitignore
+
+# Muut turhat tiedostot
+*.swp
+*.swo
+.DS_Store
