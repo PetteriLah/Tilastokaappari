@@ -8,7 +8,7 @@ app = Flask(__name__)
 app.secret_key = 'salainen_avain'  # Tarvitaan flash-viesteille
 
 # Tietokannan asetukset
-DATA_DIR = "data"
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 DATABASE_FILE = os.path.join(DATA_DIR, "kilpailut.db")
 LAST_UPDATE_FILE = os.path.join(DATA_DIR, "last_update.txt")
 
