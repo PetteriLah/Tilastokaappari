@@ -8,20 +8,25 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Luo tarvittavat hakemistot
-RUN mkdir -p /app/data && chmod -R a+rw /app/data
-RUN mkdir -p /app/templates
+RUN mkdir -p /app/data /app/templates
 
-# Kopioi ensin vaatimukset
+# Kopioi ensin vaatimukset (optimoi build cachea)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
-# Kopioi kaikki sovellustiedostot
+# Kopioi ensin templates-kansio erikseen
+COPY templates/ /app/templates/
+
+# Kopioi loput tiedostot
 COPY . .
+
+# Aseta oikeudet
+RUN chmod -R a+rw /app/data
 
 # Ympäristömuuttujat
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Europe/Helsinki
-ENV PORT=8080
+ENV FLASK_APP=app.py
 
 # Suorituskomento
 CMD ["gunicorn", "-b", "0.0.0.0:8080", "--workers", "2", "app:app"]
