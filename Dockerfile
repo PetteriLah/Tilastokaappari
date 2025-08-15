@@ -7,26 +7,11 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Luo tarvittavat hakemistot
+# Luo hakemistot ja kopioi tiedostot
 RUN mkdir -p /app/data /app/templates
-
-# Kopioi ensin vaatimukset (optimoi build cachea)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
-
-# Kopioi ensin templates-kansio erikseen
-COPY templates/ /app/templates/
-
-# Kopioi loput tiedostot
 COPY . .
-
-# Aseta oikeudet
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
 RUN chmod -R a+rw /app/data
-
-# Ympäristömuuttujat
-ENV PYTHONUNBUFFERED=1
-ENV TZ=Europe/Helsinki
-ENV FLASK_APP=app.py
 
 # Suorituskomento
 CMD ["gunicorn", "-b", "0.0.0.0:8080", "--workers", "2", "app:app"]
