@@ -11,7 +11,6 @@ app.secret_key = 'salainen_avain'  # Tarvitaan flash-viesteille
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
-app = Flask(__name__, template_folder=TEMPLATE_DIR
 DATABASE_FILE = os.path.join(DATA_DIR, "kilpailut.db")
 LAST_UPDATE_FILE = os.path.join(DATA_DIR, "last_update.txt")
 
