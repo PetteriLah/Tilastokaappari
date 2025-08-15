@@ -28,4 +28,4 @@ ENV PYTHONUNBUFFERED=1
 ENV TZ=Europe/Helsinki
 
 # Käynnistä sovellus
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]  
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]  
