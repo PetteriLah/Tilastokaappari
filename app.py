@@ -429,4 +429,4 @@ if __name__ == '__main__':
         print("Tietokantaa ei löydy! Luo ensin tietokanta suorittamalla tulosten_haku.py")
         exit(1)
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=True)
