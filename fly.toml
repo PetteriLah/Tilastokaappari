@@ -12,7 +12,8 @@ app = "tilastokaappari"
 
 [env]
   PORT = "8080"  # Kerrotaan sovellukselle kuunneltava portti
-
+  FLY_APP_NAME = "tilastokaappari"  # Lisätty uusi ympäristömuuttuja
+  
 [[mounts]]
   source = "tilastokaappari_data"  # Käytä täsmälleen tätä muotoa
   destination = "/app/data"
