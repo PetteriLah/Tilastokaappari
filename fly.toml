@@ -14,5 +14,5 @@ app = "tilastokaappari"
   PORT = "8080"  # Kerrotaan sovellukselle kuunneltava portti
 
 [[mounts]]
-  source = "tilastokaappari_data"
+  source = "tilastokaappari_data"  # Käytä täsmälleen tätä muotoa
   destination = "/app/data"
