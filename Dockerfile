@@ -9,16 +9,17 @@ RUN apt-get update && \
 
 # Luo tarvittavat hakemistot
 RUN mkdir -p /app/data /app/templates
-# Oikeudet data-kansiolle
+
+# Aseta oikeudet
 RUN chmod -R a+rw /app/data
 RUN chmod -R a+rw /app/templates
 
-# Kopioi kaikki tiedostot (mukaan lukien data ja templates)
+# Kopioi riippuvuudet ensin
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+# Kopioi sovelluksen tiedostot
 COPY . .
-
-# Asenna Python-riippuvuudet
-RUN pip install --no-cache-dir -r requirements.txt
-
 
 
 # Ympäristömuuttujat
@@ -27,7 +28,4 @@ ENV TZ=Europe/Helsinki
 ENV FLASK_APP=app.py
 
 # Suorituskomento
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "--workers", "2", "app:app"]
-CMD python app.py
-
-
+CMD ["python", "app.py"]
