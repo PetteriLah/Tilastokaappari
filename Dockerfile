@@ -8,7 +8,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Luo tarvittavat hakemistot
-RUN mkdir -p /app/data /app/templates
+RUN mkdir -p /app/data
+RUN mkdir -p /app/templates
 
 # Aseta oikeudet
 RUN chmod -R a+rw /app/data
@@ -29,3 +30,4 @@ ENV FLASK_APP=app.py
 
 # Suorituskomento
 CMD ["python", "app.py"]
+
