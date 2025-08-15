@@ -2,25 +2,27 @@ FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
-# Asenna järjestelmäriippuvuudet
+# Asenna riippuvuudet
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    gcc \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends gcc python3-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 # Luo tarvittavat hakemistot
-RUN mkdir -p /app/data && mkdir -p /app/templates
+RUN mkdir -p /app/data /app/templates
 
-# Kopioi kaikki tiedostot
+# Kopioi kaikki tiedostot (mukaan lukien data ja templates)
 COPY . .
 
 # Asenna Python-riippuvuudet
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Oikeudet data-kansiolle
+RUN chmod -R a+rw /app/data
+
 # Ympäristömuuttujat
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Europe/Helsinki
+ENV FLASK_APP=app.py
 
-# Suorita Flask-sovellus
+# Suorituskomento
 CMD python app.py
