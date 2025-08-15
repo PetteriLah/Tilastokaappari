@@ -17,6 +17,10 @@ LAST_UPDATE_FILE = os.path.join(DATA_DIR, "last_update.txt")
 def get_db_connection():
     conn = sqlite3.connect(DATABASE_FILE)
     conn.row_factory = sqlite3.Row
+    # Aseta timeout ja muistin säästöasetuksia
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA cache_size = -2000")  # 2MB cache
     return conn
 
 def check_db_update():
@@ -101,14 +105,12 @@ def index():
 
 @app.route('/kilpailut')
 def nayta_kilpailut():
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    c.execute("SELECT kilpailu_id, kilpailun_nimi, alkupvm FROM Kilpailut ORDER BY alkupvm DESC")
-    kilpailut = c.fetchall()
-    
-    conn.close()
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT kilpailu_id, kilpailun_nimi, alkupvm FROM Kilpailut ORDER BY alkupvm DESC")
+        kilpailut = c.fetchall()
     return render_template('kilpailut.html', kilpailut=kilpailut)
+    
 
 @app.route('/kilpailu/<int:kilpailu_id>')
 def nayta_kilpailun_tulokset(kilpailu_id):
