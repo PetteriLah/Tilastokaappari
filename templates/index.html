@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Etusivu{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6 offset-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title text-center">Tervetuloa tulospalveluun!</h2>
+                <p class="card-text text-center">Selaa kilpailutuloksia ja urheilijoiden suorituksia.</p>
+                
+                <div class="d-grid gap-2 mb-3">
+                    <a href="{{ url_for('nayta_kilpailut') }}" class="btn btn-primary">Selaa kilpailuja</a>
+                    <a href="{{ url_for('listaa_lajit') }}" class="btn btn-secondary">Selaa lajeja</a>
+                    <a href="{{ url_for('listaa_urheilijat') }}" class="btn btn-info">Selaa urheilijoita</a>
+                </div>
+                
+                <div class="alert alert-secondary">
+                    <p class="mb-1">
+                        <strong>Tietokanta:</strong> 
+                        {% if db_last_update %}
+                            Viimeksi päivitetty {{ db_last_update }}
+                        {% else %}
+                            Päivitysaika ei tiedossa
+                        {% endif %}
+                    </p>
+                    {% if db_needs_update %}
+                        <p class="mb-1 text-danger">Tietokanta vaatii päivitystä!</p>
+                    {% endif %}
+                    <a href="{{ url_for('paivita_tietokanta') }}" class="btn btn-sm btn-warning">
+                        Päivitä tietokanta nyt
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
