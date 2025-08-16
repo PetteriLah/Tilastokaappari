@@ -396,11 +396,13 @@ def listaa_urheilijat():
     # Suodata ikähaarukalla jos annettu
     if ika_min is not None or ika_max is not None:
         filtered_urheilijat = []
+        current_year = datetime.now().year  # Lisää tämä rivi
         for urheilija in urheilijat:
-            ika = current_year - urheilija['syntymavuosi']
-            if ((ika_min is None or ika >= ika_min) and 
-                (ika_max is None or ika <= ika_max)):
-                filtered_urheilijat.append(urheilija)
+            if urheilija['syntymavuosi']:
+                ika = current_year - urheilija['syntymavuosi']
+                if ((ika_min is None or ika >= ika_min) and 
+                    (ika_max is None or ika <= ika_max)):
+                    filtered_urheilijat.append(urheilija)
         urheilijat = filtered_urheilijat
     
     conn.close()
