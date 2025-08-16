@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.9-alpine  # Kevyempi kuin slim
 
 WORKDIR /app
 
@@ -7,6 +7,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc python3-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+    
+RUN apk add --no-cache libc6-compat  # SQLite vaatii tämän
 
 # Kopioi ensin vaatimukset optimoidakseen kerroskäyttöä
 COPY requirements.txt .
@@ -26,3 +28,4 @@ CMD ["gunicorn", "-b", "0.0.0.0:8080", \
      "--max-requests", "100", \
      "--max-requests-jitter", "20", \
      "app:app"]
+
