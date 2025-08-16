@@ -61,23 +61,25 @@
                 {% for tulos in tulokset %}
                     <tr>
                         <td>{{ loop.index }}</td>
-                        <<td><a href="{{ url_for('hae_urheilijan_tulokset', nimi=tulos['etunimi']~' '~tulos['sukunimi']) }}">
-						{{ tulos['etunimi'] }} {{ tulos['sukunimi'] }}</a></td>
+                        <td><a href="{{ url_for('hae_urheilijan_tulokset', nimi=tulos['etunimi']~' '~tulos['sukunimi']) }}">
+                            {{ tulos['etunimi'] }} {{ tulos['sukunimi'] }}</a></td>
                         <td>{{ tulos['seura'] }}</td>
                         <td>{{ tulos['tulos'] }}</td>
                         <td>{{ tulos['kilpailun_nimi'] }}</td>
                         <td>{{ tulos['alkupvm'] }}</td>
                         <td>{{ tulos['sijoitus'] }}</td>
-						<td>
-						    {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
-						        {{ tulos['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
-						    {% else %}
-						        -
-						    {% endif %}
-						</td
+                        <td>
+                            {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
+                                {{ tulos['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
                         <td>
                             {% if tulos['sukupuoli'] %}
                                 {% if tulos['sukupuoli'].upper() == 'M' %}Mies{% else %}Nainen{% endif %}
+                            {% else %}
+                                -
                             {% endif %}
                         </td>
                     </tr>
