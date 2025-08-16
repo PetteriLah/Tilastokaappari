@@ -10,10 +10,11 @@ app = "tilastokaappari"
 [[mounts]]
   source = "tilastokaappari_data"
   destination = "/app/data"
+  
 [env]
-  # Vähemmän muistia käyttävät asetukset
-  GUNICORN_WORKERS = "2"  # Vähennä workerien määrää jos tarpeen
-  GUNICORN_TIMEOUT = "30"  # Lyhennä timeouttia
+  GUNICORN_WORKERS = "1"  # Vain yksi worker
+  GUNICORN_TIMEOUT = "30"
+  GUNICORN_MAX_REQUESTS = "50"  # Uudelleenkäynnistys joka 50. pyyntö
 
 # Muistirajoitukset
 [resources]
