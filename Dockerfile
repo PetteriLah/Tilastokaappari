@@ -18,7 +18,7 @@ COPY . .
 RUN chmod -R a+rw /app/data
 
 # Määritä Gunicornille muistirajoitukset
-CMD ["gunicorn", "-b", "0.0.0.0:8080", \
+CMD ["gunicorn", "-b", "0.0.0.0:10000", \
      "--workers", "1", \
      "--threads", "2", \
      "--worker-class", "gthread", \
@@ -26,3 +26,4 @@ CMD ["gunicorn", "-b", "0.0.0.0:8080", \
      "--max-requests", "50", \
      "--max-requests-jitter", "20", \
      "app:app"]
+
