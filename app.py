@@ -383,6 +383,8 @@ def listaa_urheilijat():
     
     # Käsittele duplikaatit Pythonissa
     unique_urheilijat = {}
+    current_year = datetime.now().year  # Lisätty current_year määrittely
+    
     for urheilija in kaikki_urheilijat:
         # Luo uniikki avain nimelle ja syntymävuodelle
         avain = f"{urheilija['etunimi'].lower()}-{urheilija['sukunimi'].lower()}-{urheilija['syntymavuosi']}"
@@ -396,9 +398,8 @@ def listaa_urheilijat():
     # Suodata ikähaarukalla jos annettu
     if ika_min is not None or ika_max is not None:
         filtered_urheilijat = []
-        current_year = datetime.now().year  # Lisää tämä rivi
         for urheilija in urheilijat:
-            if urheilija['syntymavuosi']:
+            if urheilija['syntymavuosi']:  # Varmistetaan että syntymavuosi on olemassa
                 ika = current_year - urheilija['syntymavuosi']
                 if ((ika_min is None or ika >= ika_min) and 
                     (ika_max is None or ika <= ika_max)):
