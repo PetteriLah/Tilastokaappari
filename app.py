@@ -222,7 +222,7 @@ def hae_lajin_parhaat_tulokset():
     sukupuoli = request.args.get('sukupuoli', '').upper()
     ika_min = request.args.get('ika_min', type=int)
     ika_max = request.args.get('ika_max', type=int)
-    vuosi = request.args.get('vuosi', type=int)  # Uusi parametri
+    vuosi = request.args.get('vuosi', type=int)
     
     if not laji:
         return render_template('error.html', message='Anna lajin nimi'), 400
@@ -239,7 +239,8 @@ def hae_lajin_parhaat_tulokset():
     conn = get_db_connection()
     c = conn.cursor()
     
-    sql = f"""
+    # Muodosta SQL-kysely
+    sql = """
         WITH ParhaatTulokset AS (
             SELECT 
                 u.urheilija_id,
@@ -270,7 +271,7 @@ def hae_lajin_parhaat_tulokset():
                             CAST(t.tulos AS REAL)
                         ELSE
                             CASE WHEN ? = 'ASC' THEN 999999 ELSE -999999 END
-                        END {jarjestys}
+                        END {0}
                 ) AS rn
             FROM Urheilijat u
             JOIN Tulokset t ON u.urheilija_id = t.urheilija_id
@@ -278,7 +279,7 @@ def hae_lajin_parhaat_tulokset():
             JOIN Lajit l ON t.laji_id = l.laji_id
             JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
             WHERE l.lajin_nimi LIKE ? AND t.tulos != 'DNS' AND t.tulos != 'DNF'
-    """
+    """.format(jarjestys)
     
     params = [jarjestys, jarjestys, f'%{laji}%']
     
@@ -297,13 +298,13 @@ def hae_lajin_parhaat_tulokset():
         sql += " AND k.alkupvm IS NOT NULL AND u.syntymavuosi IS NOT NULL"
         
         if ika_min is not None and ika_max is not None:
-            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi BETWEEN ? AND ?"
+            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi BETWEEN ? AND ?)"
             params.extend([ika_min, ika_max])
         elif ika_min is not None:
-            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi >= ?"
+            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi >= ?)"
             params.append(ika_min)
         elif ika_max is not None:
-            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi <= ?"
+            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi <= ?)"
             params.append(ika_max)
     
     sql += """
@@ -320,12 +321,19 @@ def hae_lajin_parhaat_tulokset():
             sijoitus
         FROM ParhaatTulokset
         WHERE rn = 1
-        ORDER BY tulos_numero {}
+        ORDER BY tulos_numero {0}
         LIMIT 50
     """.format(jarjestys)
     
-    c.execute(sql, params)
-    tulokset = c.fetchall()
+    try:
+        c.execute(sql, params)
+        tulokset = c.fetchall()
+    except sqlite3.OperationalError as e:
+        conn.close()
+        app.logger.error(f"SQL virhe: {str(e)}")
+        app.logger.error(f"SQL-kysely: {sql}")
+        app.logger.error(f"Parametrit: {params}")
+        return render_template('error.html', message='Tietokantavirhe'), 500
     
     # Hae saatavilla olevat vuodet valikkoon
     c.execute("""
@@ -353,10 +361,11 @@ def listaa_urheilijat():
     ika_min = request.args.get('ika_min', type=int)
     ika_max = request.args.get('ika_max', type=int)
     
+    current_year = datetime.now().year  # Lisätty tämä rivi
+    
     conn = get_db_connection()
     c = conn.cursor()
     
-    # Hae kaikki urheilijat suoraan Urheilijat-taulusta
     sql = """
         SELECT 
             urheilija_id,
@@ -370,36 +379,28 @@ def listaa_urheilijat():
     
     params = []
     
-    # Lisää sukupuoli-suodatin jos annettu
     if sukupuoli in ['M', 'N']:
         sql += " AND sukupuoli = ?"
         params.append(sukupuoli)
     
-    # Suodata pois urheilijat joilta puuttuu tärkeät tiedot
     sql += " AND sukupuoli IS NOT NULL AND syntymavuosi IS NOT NULL"
     
     c.execute(sql, params)
     kaikki_urheilijat = c.fetchall()
     
-    # Käsittele duplikaatit Pythonissa
     unique_urheilijat = {}
-    current_year = datetime.now().year  # Lisätty current_year määrittely
-    
     for urheilija in kaikki_urheilijat:
-        # Luo uniikki avain nimelle ja syntymävuodelle
         avain = f"{urheilija['etunimi'].lower()}-{urheilija['sukunimi'].lower()}-{urheilija['syntymavuosi']}"
         if avain not in unique_urheilijat:
             unique_urheilijat[avain] = urheilija
     
-    # Muunna sanakirja listaksi ja järjestä
     urheilijat = sorted(unique_urheilijat.values(), 
                        key=lambda x: (x['sukunimi'], x['etunimi']))
     
-    # Suodata ikähaarukalla jos annettu
     if ika_min is not None or ika_max is not None:
         filtered_urheilijat = []
         for urheilija in urheilijat:
-            if urheilija['syntymavuosi']:  # Varmistetaan että syntymavuosi on olemassa
+            if urheilija['syntymavuosi']:
                 ika = current_year - urheilija['syntymavuosi']
                 if ((ika_min is None or ika >= ika_min) and 
                     (ika_max is None or ika <= ika_max)):
