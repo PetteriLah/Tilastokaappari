@@ -17,10 +17,10 @@ LAST_UPDATE_FILE = os.path.join(DATA_DIR, "last_update.txt")
 def get_db_connection():
     conn = sqlite3.connect(DATABASE_FILE)
     conn.row_factory = sqlite3.Row
-    # Aseta timeout ja muistin säästöasetuksia
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA synchronous = NORMAL")
-    conn.execute("PRAGMA cache_size = -2000")  # 2MB cache
+    conn.execute("PRAGMA journal_mode = OFF")  # Ei transaction logia
+    conn.execute("PRAGMA synchronous = OFF")  # Ei odota kirjoituksen vahvistusta
+    conn.execute("PRAGMA cache_size = -200")  # Vain 200KB cache
+    conn.execute("PRAGMA mmap_size = 268435456")  # 256MB memory mapping
     return conn
 
 def check_db_update():
