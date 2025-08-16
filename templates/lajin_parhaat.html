@@ -69,8 +69,8 @@
                         <td>{{ tulos['alkupvm'] }}</td>
                         <td>{{ tulos['sijoitus'] }}</td>
                         <td>
-                            {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
-                                {{ tulos['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
+                            {% if tulos['ika'] is not none %}
+                                {{ tulos['ika'] }}v
                             {% else %}
                                 -
                             {% endif %}
