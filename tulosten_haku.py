@@ -291,13 +291,13 @@ def siisti_lajin_nimi(lajin_nimi):
 
 # Muokkaa save_event_results funktiota (korvaa vanha lajin nimi käsittely):
 def save_event_results(conn, competition_id, event_id, event_name, results):
-    """Tallentaa tulokset tietokantaan"""
+    """Tallentaa tulokset tietokantaan ja päivittää last_updated-sarakkeen"""
     if not conn or not event_id or not event_name or not isinstance(results, list):
         return []
         
     c = conn.cursor()
     series = extract_series_from_event_name(event_name)
-    athletes_data = []  # Siirretään muuttujan määrittely tänne
+    athletes_data = []
     
     # Siistitään lajin nimi ennen tallennusta
     cleaned_event_name = siisti_lajin_nimi(event_name)
@@ -306,10 +306,10 @@ def save_event_results(conn, competition_id, event_id, event_name, results):
         # Hae kilpailun tiedot API:sta
         comp_info = fetch_competition_info(competition_id)
         
-        # 1. Varmista että kilpailu on olemassa (päivitä myös muut tiedot)
+        # 1. Varmista että kilpailu on olemassa (päivitä myös last_updated)
         c.execute('''INSERT OR REPLACE INTO Kilpailut 
-                     (kilpailu_id, kilpailun_nimi, paikkakunta, alkupvm, loppupvm) 
-                     VALUES (?, ?, ?, ?, ?)''',
+                     (kilpailu_id, kilpailun_nimi, paikkakunta, alkupvm, loppupvm, last_updated) 
+                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)''',
                   (int(competition_id), 
                    str(comp_info['Name']),
                    str(comp_info['Location']) if comp_info['Location'] else None,
@@ -390,8 +390,7 @@ def save_event_results(conn, competition_id, event_id, event_name, results):
         conn.rollback()
         print(f"Virhe tallennettaessa tuloksia: {str(e)}", file=sys.stderr)
     
-    return athletes_data  # Palautetaan athletes_data riippumatta siitä onnistuiko try vai ei
-    
+    return athletes_data 
 
 def print_results_by_series(conn, competition_id, seura_filter=None):
     """Tulostaa tulokset ryhmiteltynä sarjoittain"""
