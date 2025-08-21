@@ -1,11 +1,13 @@
+import threading
+import time
+from datetime import datetime, timedelta
 import os
 import sqlite3
-from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template, request, url_for, redirect, flash
 import subprocess
 
 app = Flask(__name__)
-app.secret_key = 'salainen_avain'  # Tarvitaan flash-viesteille
+app.secret_key = 'salainen_avain'
 
 # Tietokannan asetukset
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -14,76 +16,102 @@ TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
 DATABASE_FILE = os.path.join(DATA_DIR, "kilpailut.db")
 LAST_UPDATE_FILE = os.path.join(DATA_DIR, "last_update.txt")
 
+# Päivitystilan seuranta
+update_in_progress = False
+last_update_status = {"success": None, "message": ""}
+
 def get_db_connection():
     conn = sqlite3.connect(DATABASE_FILE)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = OFF")  # Ei transaction logia
-    conn.execute("PRAGMA synchronous = OFF")  # Ei odota kirjoituksen vahvistusta
-    conn.execute("PRAGMA cache_size = -200")  # Vain 200KB cache
-    conn.execute("PRAGMA mmap_size = 268435456")  # 256MB memory mapping
     return conn
 
+def update_database_thread():
+    """Suorita tietokannan päivitys taustasäikeessä"""
+    global update_in_progress, last_update_status
+    
+    update_in_progress = True
+    try:
+        app.logger.info("Taustapäivitys alkoi")
+        result = subprocess.run(['python', 'automaatti_haku.py'], 
+                              capture_output=True, text=True, timeout=3600)  # 1h timeout
+
+        if result.returncode == 0:
+            with open(LAST_UPDATE_FILE, 'w') as f:
+                f.write(datetime.now().isoformat())
+            last_update_status = {"success": True, "message": "Tietokanta päivitetty onnistuneesti!"}
+            app.logger.info("Taustapäivitys valmis")
+        else:
+            error_msg = f"Päivitys epäonnistui: {result.stderr}"
+            last_update_status = {"success": False, "message": error_msg}
+            app.logger.error(error_msg)
+            
+    except subprocess.TimeoutExpired:
+        error_msg = "Päivitys aikakatkaistiin (yli 1 tunti)"
+        last_update_status = {"success": False, "message": error_msg}
+        app.logger.error(error_msg)
+    except Exception as e:
+        error_msg = f"Päivitysprosessi epäonnistui: {str(e)}"
+        last_update_status = {"success": False, "message": error_msg}
+        app.logger.error(error_msg)
+    finally:
+        update_in_progress = False
 
 def check_db_update():
-    """Tarkistaa päivitysajan ja päivittää tietokannan tarvittaessa"""
+    """Tarkistaa päivitysajan ja käynnistää taustapäivityksen tarvittaessa"""
+    global update_in_progress
+    
+    # Älä päivitä jos päivitys on jo meneillään
+    if update_in_progress:
+        app.logger.info("Päivitys on jo meneillään")
+        return
+        
     try:
         # Lue viimeisin päivitysaika
         if os.path.exists(LAST_UPDATE_FILE):
             with open(LAST_UPDATE_FILE, 'r') as f:
                 last_update_str = f.read().strip()
                 last_update = datetime.fromisoformat(last_update_str)
-                # Oleta että tallennettu aika on UTC, jos ei ole aikavyöhykettä
-                if last_update.tzinfo is None:
-                    last_update = last_update.replace(tzinfo=timezone.utc)
         else:
-            last_update = datetime.min.replace(tzinfo=timezone.utc)
+            last_update = datetime.min
 
-        # Käytä UTC-aikaa vertailuun
-        now_utc = datetime.now(timezone.utc)
-        
         # Päivitä jos yli 24h vanha
-        if now_utc - last_update > timedelta(days=1):
-            update_database()
+        if datetime.now() - last_update > timedelta(days=1):
+            # Käynnistä taustasäie
+            thread = threading.Thread(target=update_database_thread)
+            thread.daemon = True  # Säie sammuu kun pääohjelma sammuu
+            thread.start()
+            app.logger.info("Taustapäivitys käynnistetty")
+            
     except Exception as e:
         app.logger.error(f"Automaattipäivitys epäonnistui: {str(e)}")
 
-def update_database():
-    """Suorita tietokannan päivitys"""
-    try:
-        # Suorita automaatti_haku.py
-        result = subprocess.run(['python', 'automaatti_haku.py'], 
-                              capture_output=True, text=True)
-
-        if result.returncode == 0:
-            # Päivitä päivitysaika UTC-ajassa
-            with open(LAST_UPDATE_FILE, 'w') as f:
-                f.write(datetime.now(timezone.utc).isoformat())
-            return True
-        else:
-            app.logger.error(f"Päivitys epäonnistui: {result.stderr}")
-            return False
-    except Exception as e:
-        app.logger.error(f"Päivitysprosessi epäonnistui: {str(e)}")
-        return False
-
 @app.route('/paivita_tietokanta')
 def paivita_tietokanta():
-    """Manuaalinen tietokannan päivitys"""
-    if update_database():
-        flash('Tietokanta päivitetty onnistuneesti!', 'success')
+    """Manuaalinen tietokannan päivitys taustalla"""
+    global update_in_progress
+    
+    if update_in_progress:
+        flash('Päivitys on jo meneillään', 'info')
     else:
-        flash('Tietokannan päivitys epäonnistui', 'danger')
+        # Käynnistä taustapäivitys
+        thread = threading.Thread(target=update_database_thread)
+        thread.daemon = True
+        thread.start()
+        flash('Taustapäivitys käynnistetty. Sivu päivittyy automaattisesti.', 'success')
+    
     return redirect(url_for('index'))
 
 @app.before_request
 def before_request():
     """Suorita ennen jokaista pyyntöä"""
-    if request.endpoint != 'static':  # Älä tarkista staattisille resursseille
+    if request.endpoint != 'static':
         check_db_update()
 
 @app.context_processor
 def inject_template_vars():
     """Lisää yhteiset muuttujat kaikille templateille"""
+    global update_in_progress, last_update_status
+    
     last_update = None
     last_update_dt = None
     needs_update = True
@@ -93,17 +121,8 @@ def inject_template_vars():
             with open(LAST_UPDATE_FILE, 'r') as f:
                 last_update_str = f.read().strip()
                 last_update_dt = datetime.fromisoformat(last_update_str)
-                # Oleta UTC-aika jos ei aikavyöhykettä
-                if last_update_dt.tzinfo is None:
-                    last_update_dt = last_update_dt.replace(tzinfo=timezone.utc)
-                
-                # Muunna paikalliseen aikaan näyttöä varten
-                local_time = last_update_dt.astimezone()
-                last_update = local_time.strftime('%d.%m.%Y %H:%M')
-                
-                # Tarkista päivitystarve UTC-ajassa
-                now_utc = datetime.now(timezone.utc)
-                needs_update = (now_utc - last_update_dt) > timedelta(days=1)
+                last_update = last_update_dt.strftime('%d.%m.%Y %H:%M')
+                needs_update = (datetime.now() - last_update_dt) > timedelta(days=1)
         except Exception as e:
             app.logger.error(f"Päivitysajan lukuvirhe: {str(e)}")
             needs_update = True
@@ -111,13 +130,17 @@ def inject_template_vars():
     return {
         'current_year': datetime.now().year,
         'db_last_update': last_update,
-        'db_needs_update': needs_update
+        'db_needs_update': needs_update,
+        'update_in_progress': update_in_progress,
+        'last_update_status': last_update_status
     }
 
+# Loput reitit pysyvät ennallaan...
 @app.route('/')
 def index():
     return render_template('index.html')
 
+# ... muut reitit
 @app.route('/kilpailut')
 def nayta_kilpailut():
     with get_db_connection() as conn:
