@@ -5,6 +5,37 @@
 {% block content %}
 <div class="row">
     <div class="col-md-6 offset-md-3">
+        <!-- Päivitystilan ilmoitukset -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        {% if update_in_progress %}
+        <div class="alert alert-info d-flex align-items-center">
+            <div class="spinner-border spinner-border-sm me-2" role="status">
+                <span class="visually-hidden">Ladataan...</span>
+            </div>
+            <strong>Tietokantaa päivitetään taustalla...</strong>
+            <div class="ms-auto">
+                <button class="btn btn-sm btn-outline-secondary" onclick="location.reload()">
+                    <i class="bi bi-arrow-clockwise"></i> Päivitä
+                </button>
+            </div>
+        </div>
+        {% elif last_update_status and last_update_status.message %}
+        <div class="alert alert-{{ 'success' if last_update_status.success else 'danger' }} alert-dismissible fade show" role="alert">
+            {{ last_update_status.message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endif %}
+
         <div class="card">
             <div class="card-body">
                 <h2 class="card-title text-center">Tervetuloa tulospalveluun!</h2>
@@ -25,15 +56,32 @@
                             Päivitysaika ei tiedossa
                         {% endif %}
                     </p>
-                    {% if db_needs_update %}
+                    {% if db_needs_update and not update_in_progress %}
                         <p class="mb-1 text-danger">Tietokanta vaatii päivitystä!</p>
                     {% endif %}
+                    
+                    {% if not update_in_progress %}
                     <a href="{{ url_for('paivita_tietokanta') }}" class="btn btn-sm btn-warning">
-                        Päivitä tietokanta nyt
+                        {% if db_needs_update %}Päivitä tietokanta nyt{% else %}Päivitä tietokanta manuaalisesti{% endif %}
                     </a>
+                    {% else %}
+                    <button class="btn btn-sm btn-warning" disabled>
+                        Päivitys meneillään...
+                    </button>
+                    {% endif %}
                 </div>
             </div>
         </div>
     </div>
 </div>
+
+<!-- Automaattinen sivunpäivitys kun päivitys on meneillään -->
+{% if update_in_progress %}
+<script>
+// Päivitä sivu 5 sekunnin välein kun päivitys on meneillään
+setTimeout(function() {
+    location.reload();
+}, 5000);
+</script>
+{% endif %}
 {% endblock %}
