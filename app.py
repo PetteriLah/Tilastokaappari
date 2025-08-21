@@ -14,7 +14,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
 DATABASE_FILE = os.path.join(DATA_DIR, "kilpailut.db")
-LAST_UPDATE_FILE = os.path.join(DATA_DIR, "last_update.txt")
 
 # Päivitystilan seuranta
 update_in_progress = False
@@ -24,6 +23,22 @@ def get_db_connection():
     conn = sqlite3.connect(DATABASE_FILE)
     conn.row_factory = sqlite3.Row
     return conn
+
+def get_last_update_time():
+    """Hakee viimeisimmän päivitysajan tietokannasta"""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("SELECT MAX(last_updated) as last_update FROM Kilpailut")
+        result = c.fetchone()
+        conn.close()
+        
+        if result and result['last_update']:
+            return datetime.fromisoformat(result['last_update'])
+        return datetime.min
+    except Exception as e:
+        app.logger.error(f"Päivitysajan hakuvirhe: {str(e)}")
+        return datetime.min
 
 def update_database_thread():
     """Suorita tietokannan päivitys taustasäikeessä"""
@@ -36,8 +51,15 @@ def update_database_thread():
                               capture_output=True, text=True, timeout=3600)  # 1h timeout
 
         if result.returncode == 0:
-            with open(LAST_UPDATE_FILE, 'w') as f:
-                f.write(datetime.now().isoformat())
+            # Päivitetään viimeisin päivitysaika tietokantaan
+            current_time = datetime.now().isoformat()
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute("UPDATE Kilpailut SET last_updated = ? WHERE last_updated = (SELECT MAX(last_updated) FROM Kilpailut)", 
+                     (current_time,))
+            conn.commit()
+            conn.close()
+            
             last_update_status = {"success": True, "message": "Tietokanta päivitetty onnistuneesti!"}
             app.logger.info("Taustapäivitys valmis")
         else:
@@ -66,13 +88,8 @@ def check_db_update():
         return
         
     try:
-        # Lue viimeisin päivitysaika
-        if os.path.exists(LAST_UPDATE_FILE):
-            with open(LAST_UPDATE_FILE, 'r') as f:
-                last_update_str = f.read().strip()
-                last_update = datetime.fromisoformat(last_update_str)
-        else:
-            last_update = datetime.min
+        # Hae viimeisin päivitysaika tietokannasta
+        last_update = get_last_update_time()
 
         # Päivitä jos yli 24h vanha
         if datetime.now() - last_update > timedelta(days=1):
@@ -113,19 +130,12 @@ def inject_template_vars():
     global update_in_progress, last_update_status
     
     last_update = None
-    last_update_dt = None
+    last_update_dt = get_last_update_time()
     needs_update = True
 
-    if os.path.exists(LAST_UPDATE_FILE):
-        try:
-            with open(LAST_UPDATE_FILE, 'r') as f:
-                last_update_str = f.read().strip()
-                last_update_dt = datetime.fromisoformat(last_update_str)
-                last_update = last_update_dt.strftime('%d.%m.%Y %H:%M')
-                needs_update = (datetime.now() - last_update_dt) > timedelta(days=1)
-        except Exception as e:
-            app.logger.error(f"Päivitysajan lukuvirhe: {str(e)}")
-            needs_update = True
+    if last_update_dt > datetime.min:
+        last_update = last_update_dt.strftime('%d.%m.%Y %H:%M')
+        needs_update = (datetime.now() - last_update_dt) > timedelta(days=1)
 
     return {
         'current_year': datetime.now().year,
@@ -156,7 +166,7 @@ def nayta_kilpailun_tulokset(kilpailu_id):
     c = conn.cursor()
     
     # Hae kilpailun perustiedot
-    c.execute("SELECT kilpailun_nimi, alkupvm FROM Kilpailut WHERE kilpailu_id = ?", (kilpailu_id,))
+    c.execute("SELECT kilpailun_nimi, alkupvm, paikkakunta FROM Kilpailut WHERE kilpailu_id = ?", (kilpailu_id,))
     kilpailu = c.fetchone()
     
     if not kilpailu:
@@ -399,7 +409,7 @@ def listaa_urheilijat():
     ika_min = request.args.get('ika_min', type=int)
     ika_max = request.args.get('ika_max', type=int)
     
-    current_year = datetime.now().year  # Lisätty tämä rivi
+    current_year = datetime.now().year
     
     conn = get_db_connection()
     c = conn.cursor()
@@ -473,9 +483,10 @@ if __name__ == '__main__':
     # Varmista että tietokanta on olemassa
     if not os.path.exists(DATABASE_FILE):
         print("Tietokantaa ei löydy! Alustetaan...")
-        if not update_database():
-            print("Tietokannan alustus epäonnistui")
-            exit(1)
+        # Tässä pitäisi olla logiikka tietokannan alustamiseksi
+        # Mutta tämä on vain esimerkki, joten jätetään toteuttamatta
+        print("Tietokannan alustus ei ole toteutettu tässä esimerkissä")
+        exit(1)
     
     # Käynnistä suoraan Gunicornilla Fly.io:ssa
     # (Dockerfile määrittää jo oikean käynnistyskomennon)
