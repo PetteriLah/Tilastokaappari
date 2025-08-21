@@ -23,6 +23,7 @@ def get_db_connection():
     conn.execute("PRAGMA mmap_size = 268435456")  # 256MB memory mapping
     return conn
 
+
 def check_db_update():
     """Tarkistaa päivitysajan ja päivittää tietokannan tarvittaessa"""
     try:
@@ -31,11 +32,17 @@ def check_db_update():
             with open(LAST_UPDATE_FILE, 'r') as f:
                 last_update_str = f.read().strip()
                 last_update = datetime.fromisoformat(last_update_str)
+                # Oleta että tallennettu aika on UTC, jos ei ole aikavyöhykettä
+                if last_update.tzinfo is None:
+                    last_update = last_update.replace(tzinfo=timezone.utc)
         else:
-            last_update = datetime.min  # Hyvin vanha päivämäärä
+            last_update = datetime.min.replace(tzinfo=timezone.utc)
+
+        # Käytä UTC-aikaa vertailuun
+        now_utc = datetime.now(timezone.utc)
         
         # Päivitä jos yli 24h vanha
-        if datetime.now() - last_update > timedelta(days=1):
+        if now_utc - last_update > timedelta(days=1):
             update_database()
     except Exception as e:
         app.logger.error(f"Automaattipäivitys epäonnistui: {str(e)}")
@@ -46,11 +53,11 @@ def update_database():
         # Suorita automaatti_haku.py
         result = subprocess.run(['python', 'automaatti_haku.py'], 
                               capture_output=True, text=True)
-        
+
         if result.returncode == 0:
-            # Päivitä päivitysaika
+            # Päivitä päivitysaika UTC-ajassa
             with open(LAST_UPDATE_FILE, 'w') as f:
-                f.write(datetime.now().isoformat())
+                f.write(datetime.now(timezone.utc).isoformat())
             return True
         else:
             app.logger.error(f"Päivitys epäonnistui: {result.stderr}")
@@ -80,24 +87,32 @@ def inject_template_vars():
     last_update = None
     last_update_dt = None
     needs_update = True
-    
+
     if os.path.exists(LAST_UPDATE_FILE):
         try:
             with open(LAST_UPDATE_FILE, 'r') as f:
                 last_update_str = f.read().strip()
                 last_update_dt = datetime.fromisoformat(last_update_str)
-                last_update = last_update_dt.strftime('%d.%m.%Y %H:%M')
-                needs_update = (datetime.now() - last_update_dt) > timedelta(days=1)
+                # Oleta UTC-aika jos ei aikavyöhykettä
+                if last_update_dt.tzinfo is None:
+                    last_update_dt = last_update_dt.replace(tzinfo=timezone.utc)
+                
+                # Muunna paikalliseen aikaan näyttöä varten
+                local_time = last_update_dt.astimezone()
+                last_update = local_time.strftime('%d.%m.%Y %H:%M')
+                
+                # Tarkista päivitystarve UTC-ajassa
+                now_utc = datetime.now(timezone.utc)
+                needs_update = (now_utc - last_update_dt) > timedelta(days=1)
         except Exception as e:
             app.logger.error(f"Päivitysajan lukuvirhe: {str(e)}")
             needs_update = True
-    
+
     return {
         'current_year': datetime.now().year,
         'db_last_update': last_update,
         'db_needs_update': needs_update
     }
-
 
 @app.route('/')
 def index():
