@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 # Asetukset
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
-DATABASE_FILE = os.path.join(DATA_DIR, "tapahtumat.db")
+DATABASE_FILE = os.path.join(DATA_DIR, "kilpailut.db")
 API_URL = "https://cached-public-api.tuloslista.com/live/v1/competition"
 FIXED_ORGANIZATION = "Noormarkun Nopsa"
 MAX_RETRIES = 3
@@ -20,48 +20,14 @@ def log_message(message, level="INFO"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] [{level}] {message}")
 
-def initialize_database():
-    """Alustaa SQLite-tietokannan ja varmistaa taulut"""
-    try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        conn = sqlite3.connect(DATABASE_FILE)
-        cursor = conn.cursor()
-        
-        # Lisää indeksi nopeampaa hakua varten
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS processed_events (
-                id INTEGER PRIMARY KEY,
-                date TEXT NOT NULL,
-                name TEXT NOT NULL,
-                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                success BOOLEAN DEFAULT 0,
-                retry_count INTEGER DEFAULT 0,
-                last_error TEXT
-            )
-        """)
-        
-        # Lisää indeksi ID-kentälle
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_processed_events_id ON processed_events(id)")
-        conn.commit()
-        log_message("Tietokanta alustettu onnistuneesti")
-    except Exception as e:
-        log_message(f"Tietokannan alustus epäonnistui: {str(e)}", "ERROR")
-        raise
-    finally:
-        if 'conn' in locals():
-            conn.close()
-
 def is_already_processed(event_id):
-    """Tarkistaa onko tapahtuma käsitelty ONNISTUNEESTI"""
+    """Tarkistaa onko kilpailu jo olemassa kilpailut.db:ssä"""
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
         
-        # Tarkista onko tapahtuma käsitelty onnistuneesti
-        cursor.execute("""
-            SELECT id FROM processed_events 
-            WHERE id = ? AND success = 1
-        """, (event_id,))
+        # Tarkista onko kilpailu jo tietokannassa
+        cursor.execute("SELECT kilpailu_id FROM Kilpailut WHERE kilpailu_id = ?", (event_id,))
         
         result = cursor.fetchone()
         return result is not None
@@ -72,48 +38,22 @@ def is_already_processed(event_id):
         if 'conn' in locals():
             conn.close()
 
-def update_event_status(event, success, error_msg=None, increment_retry=False):
-    """Päivittää tapahtuman tilan tietokantaan"""
+def update_last_updated(event_id):
+    """Päivittää kilpailun viimeisimmän päivitysajan"""
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
         
-        # Tarkista onko tapahtuma jo tietokannassa
-        cursor.execute("SELECT id FROM processed_events WHERE id = ?", (event["Id"],))
-        exists = cursor.fetchone()
-        
-        if exists:
-            # Päivitä olemassa olevaa merkintää
-            if increment_retry:
-                cursor.execute("""
-                    UPDATE processed_events 
-                    SET success = ?, last_error = ?, retry_count = retry_count + 1 
-                    WHERE id = ?
-                """, (success, error_msg, event["Id"]))
-            else:
-                cursor.execute("""
-                    UPDATE processed_events 
-                    SET success = ?, last_error = ? 
-                    WHERE id = ?
-                """, (success, error_msg, event["Id"]))
-        else:
-            # Lisää uusi merkintä
-            cursor.execute("""
-                INSERT INTO processed_events 
-                (id, date, name, success, last_error, retry_count)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                event["Id"], 
-                event["Date"], 
-                event["Name"], 
-                success, 
-                error_msg,
-                1 if increment_retry else 0
-            ))
+        cursor.execute("""
+            UPDATE Kilpailut 
+            SET last_updated = CURRENT_TIMESTAMP 
+            WHERE kilpailu_id = ?
+        """, (event_id,))
         
         conn.commit()
+        log_message(f"Päivitetty last_updated kilpailulle {event_id}", "DEBUG")
     except sqlite3.Error as e:
-        log_message(f"Tietokantavirhe tapahtuman {event['Id']} tilan päivityksessä: {str(e)}", "ERROR")
+        log_message(f"Virhe last_updated päivityksessä: {str(e)}", "ERROR")
     finally:
         if 'conn' in locals():
             conn.close()
@@ -160,10 +100,9 @@ def run_tulosten_haku(event_id):
             check=True,
             text=True,
             capture_output=True,
-            timeout=300  # 5 minuuttia timeout
+            timeout=300
         )
         
-        # Tarkista tulosteen sisältö
         if "Tiedot tallennettu" in result.stdout:
             log_message(f"tulosten_haku.py suoritettu onnistuneesti tapahtumalle {event_id}")
             return True
@@ -191,7 +130,7 @@ def run_ikalaskuri():
             check=True,
             text=True,
             capture_output=True,
-            timeout=60  # 1 minuutti timeout
+            timeout=60
         )
         
         if result.returncode == 0:
@@ -218,12 +157,12 @@ def process_event(event):
         log_message(f"Tapahtuma {event_id} ({event_name}) ohitettu - tulevaisuudessa", "DEBUG")
         return
     
-    # 2. Tarkista onko jo käsitelty onnistuneesti
+    # 2. Tarkista onko kilpailu JO OLEMASSA kilpailut.db:ssä
     if is_already_processed(event_id):
-        log_message(f"Tapahtuma {event_id} ({event_name}) ohitettu - jo käsitelty onnistuneesti", "DEBUG")
+        log_message(f"Tapahtuma {event_id} ({event_name}) ohitettu - kilpailu on jo tietokannassa", "DEBUG")
         return
     
-    # 3. Suorita tulosten haku (MAX_RETRIES kertaa)
+    # 3. Suorita tulosten haku
     success = False
     error_msg = None
     
@@ -231,10 +170,11 @@ def process_event(event):
         try:
             log_message(f"Käsitellään tapahtumaa {event_id} ({event_name}), yritys {attempt + 1}/{MAX_RETRIES}")
             
-            # Suorita tulosten haku
             success = run_tulosten_haku(event_id)
             
             if success:
+                # Päivitä last_updated onnistuneelle käsittelylle
+                update_last_updated(event_id)
                 break
             else:
                 error_msg = f"tulosten_haku.py ei palauttanut tuloksia (yritys {attempt + 1})"
@@ -246,14 +186,6 @@ def process_event(event):
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY)
     
-    # 4. Päivitä tietokanta käsittelyn tuloksesta
-    update_event_status(
-        event,
-        success=success,
-        error_msg=error_msg,
-        increment_retry=not success
-    )
-    
     if success:
         log_message(f"Tapahtuma {event_id} ({event_name}) käsitelty ONNISTUNEESTI")
     else:
@@ -262,7 +194,6 @@ def process_event(event):
 def main():
     try:
         log_message("Aloitetaan automaattihaku")
-        initialize_database()
         
         events = fetch_events()
         if not events:
@@ -270,14 +201,12 @@ def main():
         else:
             log_message(f"Aloitetaan {len(events)} tapahtuman käsittely")
             
-            # Käsitellään tapahtumat rinnakkain (max 5 säiettä)
             with ThreadPoolExecutor(max_workers=5) as executor:
                 for event in events:
                     executor.submit(process_event, event)
             
             log_message("Kaikki tapahtumat käsitelty")
         
-        # Suorita ikälaskuri aina pääohjelman lopussa
         log_message("Aloitetaan ikälaskurin suoritus")
         run_ikalaskuri()
         
