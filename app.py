@@ -123,10 +123,8 @@ def paivita_tietokanta():
 @app.before_request
 def before_request():
     """Suorita ennen jokaista pyyntöä"""
-    # Väliaikaisesti kommentoitu pois, jotta saadaan sovellus käynnistymään
-    # if request.endpoint != 'static':
-    #     check_db_update()
-    pass
+    if request.endpoint != 'static':
+        check_db_update()
 
 @app.context_processor
 def inject_template_vars():
@@ -153,7 +151,6 @@ def inject_template_vars():
 def index():
     return render_template('index.html')
 
-
 @app.route('/kilpailut')
 def nayta_kilpailut():
     try:
@@ -161,57 +158,100 @@ def nayta_kilpailut():
             c = conn.cursor()
             c.execute("SELECT kilpailu_id, kilpailun_nimi, alkupvm FROM Kilpailut ORDER BY alkupvm DESC")
             kilpailut = c.fetchall()
-        return render_template('kilpailut.html', kilpailut=kilpailut)
+            
+            # Muunnetaan tuplet sanakirjoiksi
+            kilpailut_list = []
+            for kilpailu in kilpailut:
+                kilpailut_list.append({
+                    'kilpailu_id': kilpailu[0],
+                    'kilpailun_nimi': kilpailu[1],
+                    'alkupvm': kilpailu[2]
+                })
+                
+        return render_template('kilpailut.html', kilpailut=kilpailut_list)
     except Exception as e:
         app.logger.error(f"Kilpailujen hakuvirhe: {str(e)}")
         return render_template('error.html', message='Tietokantayhteys epäonnistui'), 500
 
-# ... (muut reitit pysyvät samanlaisina)
-
 @app.route('/kilpailu/<int:kilpailu_id>')
 def nayta_kilpailun_tulokset(kilpailu_id):
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    # Hae kilpailun perustiedot
-    c.execute("SELECT kilpailun_nimi, alkupvm, paikkakunta FROM Kilpailut WHERE kilpailu_id = %s", (kilpailu_id,))
-    kilpailu = c.fetchone()
-    
-    if not kilpailu:
-        conn.close()
-        return render_template('error.html', message='Kilpailua ei löytynyt'), 404
-    
-    # Hae kilpailun lajit
-    c.execute("""
-        SELECT laji_id, lajin_nimi, sarja 
-        FROM Lajit 
-        WHERE kilpailu_id = %s
-        ORDER BY lajin_nimi
-    """, (kilpailu_id,))
-    lajit = c.fetchall()
-    
-    # Hae tulokset kullekin lajille
-    tulokset = {}
-    for laji in lajit:
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        # Hae kilpailun perustiedot
+        c.execute("SELECT kilpailun_nimi, alkupvm, paikkakunta FROM Kilpailut WHERE kilpailu_id = %s", (kilpailu_id,))
+        kilpailu = c.fetchone()
+        
+        if not kilpailu:
+            conn.close()
+            return render_template('error.html', message='Kilpailua ei löytynyt'), 404
+        
+        # Muunnetaan kilpailu sanakirjaksi
+        kilpailu_dict = {
+            'kilpailun_nimi': kilpailu[0],
+            'alkupvm': kilpailu[1],
+            'paikkakunta': kilpailu[2]
+        }
+        
+        # Hae kilpailun lajit
         c.execute("""
-            SELECT t.sijoitus, u.etunimi, u.sukunimi, 
-                   COALESCE(s.seura_nimi, '-') as seura, 
-                   COALESCE(t.tulos, t.lisatiedot) as tulos,
-                   u.syntymavuosi, u.sukupuoli
-            FROM Tulokset t
-            JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
-            LEFT JOIN Seurat s ON u.seura_id = s.seura_id
-            WHERE t.laji_id = %s
-            ORDER BY t.sijoitus
-        """, (laji[0],))  # Muutettu indeksi 0:ksi (laji_id on ensimmäinen sarake)
-        tulokset[laji[0]] = c.fetchall()
-    
-    conn.close()
-    
-    return render_template('kilpailun_tulokset.html', 
-                         kilpailu=kilpailu, 
-                         lajit=lajit, 
-                         tulokset=tulokset)
+            SELECT laji_id, lajin_nimi, sarja 
+            FROM Lajit 
+            WHERE kilpailu_id = %s
+            ORDER BY lajin_nimi
+        """, (kilpailu_id,))
+        lajit = c.fetchall()
+        
+        # Muunnetaan lajit sanakirjoiksi
+        lajit_list = []
+        for laji in lajit:
+            lajit_list.append({
+                'laji_id': laji[0],
+                'lajin_nimi': laji[1],
+                'sarja': laji[2]
+            })
+        
+        # Hae tulokset kullekin lajille
+        tulokset = {}
+        for laji in lajit_list:
+            c.execute("""
+                SELECT t.sijoitus, u.etunimi, u.sukunimi, 
+                       COALESCE(s.seura_nimi, '-') as seura, 
+                       COALESCE(t.tulos, t.lisatiedot) as tulos,
+                       u.syntymavuosi, u.sukupuoli
+                FROM Tulokset t
+                JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
+                LEFT JOIN Seurat s ON u.seura_id = s.seura_id
+                WHERE t.laji_id = %s
+                ORDER BY t.sijoitus
+            """, (laji['laji_id'],))
+            results = c.fetchall()
+            
+            # Muunnetaan tulokset sanakirjoiksi
+            tulokset_list = []
+            for result in results:
+                tulokset_list.append({
+                    'sijoitus': result[0],
+                    'etunimi': result[1],
+                    'sukunimi': result[2],
+                    'seura': result[3],
+                    'tulos': result[4],
+                    'syntymavuosi': result[5],
+                    'sukupuoli': result[6]
+                })
+                
+            tulokset[laji['laji_id']] = tulokset_list
+        
+        conn.close()
+        
+        return render_template('kilpailun_tulokset.html', 
+                             kilpailu=kilpailu_dict, 
+                             lajit=lajit_list, 
+                             tulokset=tulokset)
+    except Exception as e:
+        app.logger.error(f"Kilpailun tulosten hakuvirhe: {str(e)}")
+        return render_template('error.html', message='Tietokantavirhe'), 500
 
 @app.route('/urheilija')
 def hae_urheilijan_tulokset():
@@ -223,54 +263,68 @@ def hae_urheilijan_tulokset():
     if not nimi:
         return render_template('error.html', message='Anna urheilijan nimi'), 400
     
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    # Muodosta SQL-kysely dynaamisesti suodattimien perusteella
-    sql = """
-        SELECT l.lajin_nimi, l.sarja, k.kilpailun_nimi, k.alkupvm, 
-               COALESCE(t.tulos, t.lisatiedot) as tulos,
-               t.sijoitus, u.syntymavuosi, u.sukupuoli
-        FROM Tulokset t
-        JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
-        JOIN Lajit l ON t.laji_id = l.laji_id
-        JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
-        WHERE (u.etunimi ILIKE %s OR u.sukunimi ILIKE %s OR (u.etunimi || ' ' || u.sukunimi) ILIKE %s)
-    """
-    params = [f'%{nimi}%', f'%{nimi}%', f'%{nimi}%']
-    
-    # Lisää sukupuoli-suodatin jos annettu
-    if sukupuoli in ['M', 'N']:
-        sql += " AND u.sukupuoli = %s"
-        params.append(sukupuoli)
-    
-    # Lisää ikäsuodattimet jos annettu
-    if ika_min is not None or ika_max is not None:
-        sql += " AND k.alkupvm IS NOT NULL AND u.syntymavuosi IS NOT NULL"
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
         
-        if ika_min is not None and ika_max is not None:
-            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi BETWEEN %s AND %s)"
-            params.extend([ika_min, ika_max])
-        elif ika_min is not None:
-            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi >= %s)"
-            params.append(ika_min)
-        elif ika_max is not None:
-            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi <= %s)"
-            params.append(ika_max)
-    
-    sql += " ORDER BY k.alkupvm DESC, l.lajin_nimi"
-    
-    c.execute(sql, params)
-    tulokset = c.fetchall()
-    
-    conn.close()
-    
-    return render_template('urheilijan_tulokset.html', 
-                         nimi=nimi,
-                         tulokset=tulokset,
-                         sukupuoli=sukupuoli,
-                         ika_min=ika_min,
-                         ika_max=ika_max)
+        sql = """
+            SELECT l.lajin_nimi, l.sarja, k.kilpailun_nimi, k.alkupvm, 
+                   COALESCE(t.tulos, t.lisatiedot) as tulos,
+                   t.sijoitus, u.syntymavuosi, u.sukupuoli
+            FROM Tulokset t
+            JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
+            JOIN Lajit l ON t.laji_id = l.laji_id
+            JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
+            WHERE (u.etunimi ILIKE %s OR u.sukunimi ILIKE %s OR (u.etunimi || ' ' || u.sukunimi) ILIKE %s)
+        """
+        params = [f'%{nimi}%', f'%{nimi}%', f'%{nimi}%']
+        
+        if sukupuoli in ['M', 'N']:
+            sql += " AND u.sukupuoli = %s"
+            params.append(sukupuoli)
+        
+        if ika_min is not None or ika_max is not None:
+            sql += " AND k.alkupvm IS NOT NULL AND u.syntymavuosi IS NOT NULL"
+            
+            if ika_min is not None and ika_max is not None:
+                sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi BETWEEN %s AND %s)"
+                params.extend([ika_min, ika_max])
+            elif ika_min is not None:
+                sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi >= %s)"
+                params.append(ika_min)
+            elif ika_max is not None:
+                sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi <= %s)"
+                params.append(ika_max)
+        
+        sql += " ORDER BY k.alkupvm DESC, l.lajin_nimi"
+        
+        c.execute(sql, params)
+        results = c.fetchall()
+        
+        tulokset = []
+        for result in results:
+            tulokset.append({
+                'lajin_nimi': result[0],
+                'sarja': result[1],
+                'kilpailun_nimi': result[2],
+                'alkupvm': result[3],
+                'tulos': result[4],
+                'sijoitus': result[5],
+                'syntymavuosi': result[6],
+                'sukupuoli': result[7]
+            })
+        
+        conn.close()
+        
+        return render_template('urheilijan_tulokset.html', 
+                             nimi=nimi,
+                             tulokset=tulokset,
+                             sukupuoli=sukupuoli,
+                             ika_min=ika_min,
+                             ika_max=ika_max)
+    except Exception as e:
+        app.logger.error(f"Urheilijan tulosten hakuvirhe: {str(e)}")
+        return render_template('error.html', message='Tietokantavirhe'), 500
 
 @app.route('/laji')
 def hae_lajin_parhaat_tulokset():
@@ -283,135 +337,141 @@ def hae_lajin_parhaat_tulokset():
     if not laji:
         return render_template('error.html', message='Anna lajin nimi'), 400
     
-    # Määritä järjestyssuunta
-    jarjestys = "DESC"  # Oletus: suurempi on parempi
+    jarjestys = "DESC"
     aikalajit = ['kävely', 'aidat', 'esteet', 'viesti', 'aitaviesti', 'maantiejuoksu',
                 'maraton', 'puolimaraton', '10000m', '5000m', '3000m', '1500m', '800m', '400m']
     
     if (laji.lower().endswith('m') or 
         any(aikalaji in laji.lower() for aikalaji in aikalajit)):
-        jarjestys = "ASC"  # Pienempi tulos on parempi
-    
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    # Muodosta SQL-kysely (muutettu PostgreSQL-yhteensopivaksi)
-    sql = """
-        WITH ParhaatTulokset AS (
-            SELECT 
-                u.urheilija_id,
-                u.etunimi, 
-                u.sukunimi, 
-                COALESCE(s.seura_nimi, '-') as seura,
-                COALESCE(t.tulos, t.lisatiedot) as tulos,
-                k.kilpailun_nimi, 
-                k.alkupvm,
-                u.syntymavuosi, 
-                u.sukupuoli,
-                t.sijoitus,
-                CASE 
-                    WHEN t.tulos ~ '^[0-9]+:[0-9]+([.][0-9]+)?$' THEN
-                        CAST(SPLIT_PART(t.tulos, ':', 1) AS INTEGER) * 60 + 
-                        CAST(SPLIT_PART(t.tulos, ':', 2) AS NUMERIC)
-                    WHEN t.tulos ~ '^[0-9]+([.][0-9]+)?$' THEN
-                        CAST(t.tulos AS NUMERIC)
-                    ELSE
-                        CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
-                END AS tulos_numero,
-                ROW_NUMBER() OVER (
-                    PARTITION BY u.urheilija_id 
-                    ORDER BY 
-                        CASE 
-                            WHEN t.tulos ~ '^[0-9]+:[0-9]+([.][0-9]+)?$' THEN
-                                CAST(SPLIT_PART(t.tulos, ':', 1) AS INTEGER) * 60 + 
-                                CAST(SPLIT_PART(t.tulos, ':', 2) AS NUMERIC)
-                            WHEN t.tulos ~ '^[0-9]+([.][0-9]+)?$' THEN
-                                CAST(t.tulos AS NUMERIC)
-                            ELSE
-                                CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
-                        END
-                ) AS rn
-            FROM Urheilijat u
-            JOIN Tulokset t ON u.urheilija_id = t.urheilija_id
-            LEFT JOIN Seurat s ON u.seura_id = s.seura_id
-            JOIN Lajit l ON t.laji_id = l.laji_id
-            JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
-            WHERE l.lajin_nimi ILIKE %s AND t.tulos != 'DNS' AND t.tulos != 'DNF'
-    """
-    
-    params = [jarjestys, jarjestys, f'%{laji}%']
-    
-    # Lisää sukupuoli-suodatin
-    if sukupuoli in ['M', 'N']:
-        sql += " AND u.sukupuoli = %s"
-        params.append(sukupuoli)
-    
-    # Lisää vuosi-suodatin
-    if vuosi is not None:
-        sql += " AND EXTRACT(YEAR FROM k.alkupvm) = %s"
-        params.append(vuosi)
-    
-    # Lisää ikäsuodattimet
-    if ika_min is not None or ika_max is not None:
-        sql += " AND k.alkupvm IS NOT NULL AND u.syntymavuosi IS NOT NULL"
-        
-        if ika_min is not None and ika_max is not None:
-            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi BETWEEN %s AND %s)"
-            params.extend([ika_min, ika_max])
-        elif ika_min is not None:
-            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi >= %s)"
-            params.append(ika_min)
-        elif ika_max is not None:
-            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi <= %s)"
-            params.append(ika_max)
-    
-    sql += """
-        )
-        SELECT 
-            etunimi, 
-            sukunimi, 
-            seura,
-            tulos,
-            kilpailun_nimi, 
-            alkupvm,
-            syntymavuosi, 
-            sukupuoli,
-            sijoitus
-        FROM ParhaatTulokset
-        WHERE rn = 1
-        ORDER BY tulos_numero """ + jarjestys + """
-        LIMIT 50
-    """
+        jarjestys = "ASC"
     
     try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        sql = """
+            WITH ParhaatTulokset AS (
+                SELECT 
+                    u.urheilija_id,
+                    u.etunimi, 
+                    u.sukunimi, 
+                    COALESCE(s.seura_nimi, '-') as seura,
+                    COALESCE(t.tulos, t.lisatiedot) as tulos,
+                    k.kilpailun_nimi, 
+                    k.alkupvm,
+                    u.syntymavuosi, 
+                    u.sukupuoli,
+                    t.sijoitus,
+                    CASE 
+                        WHEN t.tulos ~ '^[0-9]+:[0-9]+([.][0-9]+)?$' THEN
+                            CAST(SPLIT_PART(t.tulos, ':', 1) AS INTEGER) * 60 + 
+                            CAST(SPLIT_PART(t.tulos, ':', 2) AS NUMERIC)
+                        WHEN t.tulos ~ '^[0-9]+([.][0-9]+)?$' THEN
+                            CAST(t.tulos AS NUMERIC)
+                        ELSE
+                            CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
+                    END AS tulos_numero,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY u.urheilija_id 
+                        ORDER BY 
+                            CASE 
+                                WHEN t.tulos ~ '^[0-9]+:[0-9]+([.][0-9]+)?$' THEN
+                                    CAST(SPLIT_PART(t.tulos, ':', 1) AS INTEGER) * 60 + 
+                                    CAST(SPLIT_PART(t.tulos, ':', 2) AS NUMERIC)
+                                WHEN t.tulos ~ '^[0-9]+([.][0-9]+)?$' THEN
+                                    CAST(t.tulos AS NUMERIC)
+                                ELSE
+                                    CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
+                            END
+                    ) AS rn
+                FROM Urheilijat u
+                JOIN Tulokset t ON u.urheilija_id = t.urheilija_id
+                LEFT JOIN Seurat s ON u.seura_id = s.seura_id
+                JOIN Lajit l ON t.laji_id = l.laji_id
+                JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
+                WHERE l.lajin_nimi ILIKE %s AND t.tulos != 'DNS' AND t.tulos != 'DNF'
+        """
+        
+        params = [jarjestys, jarjestys, f'%{laji}%']
+        
+        if sukupuoli in ['M', 'N']:
+            sql += " AND u.sukupuoli = %s"
+            params.append(sukupuoli)
+        
+        if vuosi is not None:
+            sql += " AND EXTRACT(YEAR FROM k.alkupvm) = %s"
+            params.append(vuosi)
+        
+        if ika_min is not None or ika_max is not None:
+            sql += " AND k.alkupvm IS NOT NULL AND u.syntymavuosi IS NOT NULL"
+            
+            if ika_min is not None and ika_max is not None:
+                sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi BETWEEN %s AND %s)"
+                params.extend([ika_min, ika_max])
+            elif ika_min is not None:
+                sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi >= %s)"
+                params.append(ika_min)
+            elif ika_max is not None:
+                sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi <= %s)"
+                params.append(ika_max)
+        
+        sql += """
+            )
+            SELECT 
+                etunimi, 
+                sukunimi, 
+                seura,
+                tulos,
+                kilpailun_nimi, 
+                alkupvm,
+                syntymavuosi, 
+                sukupuoli,
+                sijoitus
+            FROM ParhaatTulokset
+            WHERE rn = 1
+            ORDER BY tulos_numero """ + jarjestys + """
+            LIMIT 50
+        """
+        
         c.execute(sql, params)
-        tulokset = c.fetchall()
-    except Exception as e:
+        results = c.fetchall()
+        
+        tulokset = []
+        for result in results:
+            tulokset.append({
+                'etunimi': result[0],
+                'sukunimi': result[1],
+                'seura': result[2],
+                'tulos': result[3],
+                'kilpailun_nimi': result[4],
+                'alkupvm': result[5],
+                'syntymavuosi': result[6],
+                'sukupuoli': result[7],
+                'sijoitus': result[8]
+            })
+        
+        c.execute("""
+            SELECT DISTINCT EXTRACT(YEAR FROM alkupvm) as vuosi
+            FROM Kilpailut
+            WHERE alkupvm IS NOT NULL
+            ORDER BY vuosi DESC
+        """)
+        vuodet_results = c.fetchall()
+        vuodet = [r[0] for r in vuodet_results]
+        
         conn.close()
-        app.logger.error(f"SQL virhe: {str(e)}")
-        app.logger.error(f"SQL-kysely: {sql}")
-        app.logger.error(f"Parametrit: {params}")
+        
+        return render_template('lajin_parhaat.html', 
+                             laji=laji,
+                             tulokset=tulokset,
+                             sukupuoli=sukupuoli,
+                             ika_min=ika_min,
+                             ika_max=ika_max,
+                             vuosi=vuosi,
+                             vuodet=vuodet)
+    except Exception as e:
+        app.logger.error(f"Lajin parhaiden tulosten hakuvirhe: {str(e)}")
         return render_template('error.html', message='Tietokantavirhe'), 500
-    
-    # Hae saatavilla olevat vuodet valikkoon
-    c.execute("""
-        SELECT DISTINCT EXTRACT(YEAR FROM alkupvm) as vuosi
-        FROM Kilpailut
-        WHERE alkupvm IS NOT NULL
-        ORDER BY vuosi DESC
-    """)
-    vuodet = [r[0] for r in c.fetchall()]
-    
-    conn.close()
-    
-    return render_template('lajin_parhaat.html', 
-                         laji=laji,
-                         tulokset=tulokset,
-                         sukupuoli=sukupuoli,
-                         ika_min=ika_min,
-                         ika_max=ika_max,
-                         vuosi=vuosi,
-                         vuodet=vuodet)
 
 @app.route('/urheilijat')
 def listaa_urheilijat():
@@ -421,96 +481,100 @@ def listaa_urheilijat():
     
     current_year = datetime.now().year
     
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    sql = """
-        SELECT 
-            urheilija_id,
-            TRIM(etunimi) as etunimi,
-            TRIM(sukunimi) as sukunimi,
-            sukupuoli,
-            syntymavuosi
-        FROM Urheilijat
-        WHERE 1=1
-    """
-    
-    params = []
-    
-    if sukupuoli in ['M', 'N']:
-        sql += " AND sukupuoli = %s"
-        params.append(sukupuoli)
-    
-    sql += " AND sukupuoli IS NOT NULL AND syntymavuosi IS NOT NULL"
-    
-    c.execute(sql, params)
-    kaikki_urheilijat = c.fetchall()
-    
-    unique_urheilijat = {}
-    for urheilija in kaikki_urheilijat:
-        avain = f"{urheilija[1].lower()}-{urheilija[2].lower()}-{urheilija[4]}"  # Muutettu indekseihin
-        if avain not in unique_urheilijat:
-            unique_urheilijat[avain] = {
-                'urheilija_id': urheilija[0],
-                'etunimi': urheilija[1],
-                'sukunimi': urheilija[2],
-                'sukupuoli': urheilija[3],
-                'syntymavuosi': urheilija[4]
-            }
-    
-    urheilijat = sorted(unique_urheilijat.values(), 
-                       key=lambda x: (x['sukunimi'], x['etunimi']))
-    
-    if ika_min is not None or ika_max is not None:
-        filtered_urheilijat = []
-        for urheilija in urheilijat:
-            if urheilija['syntymavuosi']:
-                ika = current_year - urheilija['syntymavuosi']
-                if ((ika_min is None or ika >= ika_min) and 
-                    (ika_max is None or ika <= ika_max)):
-                    filtered_urheilijat.append(urheilija)
-        urheilijat = filtered_urheilijat
-    
-    conn.close()
-    
-    return render_template('urheilijat.html', 
-                        urheilijat=urheilijat,
-                        sukupuoli=sukupuoli,
-                        ika_min=ika_min,
-                        ika_max=ika_max)
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        sql = """
+            SELECT 
+                urheilija_id,
+                TRIM(etunimi) as etunimi,
+                TRIM(sukunimi) as sukunimi,
+                sukupuoli,
+                syntymavuosi
+            FROM Urheilijat
+            WHERE 1=1
+        """
+        
+        params = []
+        
+        if sukupuoli in ['M', 'N']:
+            sql += " AND sukupuoli = %s"
+            params.append(sukupuoli)
+        
+        sql += " AND sukupuoli IS NOT NULL AND syntymavuosi IS NOT NULL"
+        
+        c.execute(sql, params)
+        kaikki_urheilijat = c.fetchall()
+        
+        unique_urheilijat = {}
+        for urheilija in kaikki_urheilijat:
+            avain = f"{urheilija[1].lower()}-{urheilija[2].lower()}-{urheilija[4]}"
+            if avain not in unique_urheilijat:
+                unique_urheilijat[avain] = {
+                    'urheilija_id': urheilija[0],
+                    'etunimi': urheilija[1],
+                    'sukunimi': urheilija[2],
+                    'sukupuoli': urheilija[3],
+                    'syntymavuosi': urheilija[4]
+                }
+        
+        urheilijat = sorted(unique_urheilijat.values(), 
+                           key=lambda x: (x['sukunimi'], x['etunimi']))
+        
+        if ika_min is not None or ika_max is not None:
+            filtered_urheilijat = []
+            for urheilija in urheilijat:
+                if urheilija['syntymavuosi']:
+                    ika = current_year - urheilija['syntymavuosi']
+                    if ((ika_min is None or ika >= ika_min) and 
+                        (ika_max is None or ika <= ika_max)):
+                        filtered_urheilijat.append(urheilija)
+            urheilijat = filtered_urheilijat
+        
+        conn.close()
+        
+        return render_template('urheilijat.html', 
+                            urheilijat=urheilijat,
+                            sukupuoli=sukupuoli,
+                            ika_min=ika_min,
+                            ika_max=ika_max)
+    except Exception as e:
+        app.logger.error(f"Urheilijoiden hakuvirhe: {str(e)}")
+        return render_template('error.html', message='Tietokantavirhe'), 500
 
 @app.route('/lajit')
 def listaa_lajit():
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    c.execute("""
-        SELECT DISTINCT lajin_nimi 
-        FROM Lajit
-        ORDER BY lajin_nimi
-    """)
-    lajit = c.fetchall()
-    
-    conn.close()
-    
-    return render_template('lajit.html', lajit=lajit)
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        c.execute("""
+            SELECT DISTINCT lajin_nimi 
+            FROM Lajit
+            ORDER BY lajin_nimi
+        """)
+        lajit_results = c.fetchall()
+        lajit = [r[0] for r in lajit_results]
+        
+        conn.close()
+        
+        return render_template('lajit.html', lajit=lajit)
+    except Exception as e:
+        app.logger.error(f"Lajien hakuvirhe: {str(e)}")
+        return render_template('error.html', message='Tietokantavirhe'), 500
 
 if __name__ == '__main__':
-    # Varmista että tietokanta on saatavilla
     if not DATABASE_URL:
         print("Tietokantaosoitetta ei löydy ympäristömuuttujasta DATABASE_URL!")
         exit(1)
     
-    # Testaa tietokantayhteys
     try:
         conn = get_db_connection()
         print("Tietokantayhteys toimii!")
         conn.close()
     except Exception as e:
         print(f"Tietokantayhteys epäonnistui: {e}")
-        # Älä sulje sovellusta, vaan anna sen käynnistyä ilman tietokantayhteyttä
         print("Sovellus käynnistyy ilman tietokantayhteyttä")
     
-    # (Dockerfile määrittää jo oikean käynnistyskomennon)
-    app.run(host='0.0.0.0', port=10000, debug=False)
     app.run(host='0.0.0.0', port=10000, debug=False)
