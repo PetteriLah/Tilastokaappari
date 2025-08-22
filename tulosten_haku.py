@@ -1,5 +1,5 @@
 import requests
-import sqlite3
+import psycopg2
 import os
 from datetime import datetime
 from dateutil.parser import parse
@@ -7,11 +7,13 @@ import argparse
 import json
 import re
 import sys
+from psycopg2.extras import DictCursor
 
 # Asetukset
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-DATABASE_FILE = os.path.join(DATA_DIR, "kilpailut.db")
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
 def clean_json_response(response_text):
     """Poistaa kommentit ja ei-JSON-merkit vastauksesta"""
@@ -20,57 +22,69 @@ def clean_json_response(response_text):
     return cleaned_text.lstrip('\ufeff')
 
 def create_database():
-    """Luo tietokannan data-hakemistoon"""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_FILE)
+    """Luo tietokantataulut PostgreSQL:ään"""
+    conn = get_db_connection()
     c = conn.cursor()
     
     # Enable foreign key constraints
-    c.execute("PRAGMA foreign_keys = ON")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS Kilpailut (
+            kilpailu_id INTEGER PRIMARY KEY,
+            kilpailun_nimi TEXT NOT NULL,
+            paikkakunta TEXT,
+            alkupvm DATE,
+            loppupvm DATE,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     
-    # Create tables if they don't exist
-    c.execute('''CREATE TABLE IF NOT EXISTS Kilpailut (
-                 kilpailu_id INTEGER PRIMARY KEY,
-                 kilpailun_nimi TEXT NOT NULL,
-                 paikkakunta TEXT,
-                 alkupvm DATE,
-                 loppupvm DATE)''')
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS Lajit (
+            laji_id INTEGER PRIMARY KEY,
+            kilpailu_id INTEGER NOT NULL,
+            lajin_nimi TEXT NOT NULL,
+            sarja TEXT,
+            FOREIGN KEY (kilpailu_id) REFERENCES Kilpailut(kilpailu_id)
+        )
+    """)
     
-    c.execute('''CREATE TABLE IF NOT EXISTS Lajit (
-                 laji_id INTEGER PRIMARY KEY,
-                 kilpailu_id INTEGER NOT NULL,
-                 lajin_nimi TEXT NOT NULL,
-                 sarja TEXT,
-                 FOREIGN KEY (kilpailu_id) REFERENCES Kilpailut(kilpailu_id))''')
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS Seurat (
+            seura_id SERIAL PRIMARY KEY,
+            seura_nimi TEXT NOT NULL UNIQUE,
+            paikkakunta TEXT,
+            lyhenne TEXT
+        )
+    """)
     
-    c.execute('''CREATE TABLE IF NOT EXISTS Seurat (
-                 seura_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 seura_nimi TEXT NOT NULL UNIQUE,
-                 paikkakunta TEXT,
-                 lyhenne TEXT)''')
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS Urheilijat (
+            urheilija_id SERIAL PRIMARY KEY,
+            etunimi TEXT NOT NULL,
+            sukunimi TEXT NOT NULL,
+            syntymapaiva DATE,
+            syntymavuosi INTEGER,
+            sukupuoli TEXT,
+            seura_id INTEGER,
+            FOREIGN KEY (seura_id) REFERENCES Seurat(seura_id)
+        )
+    """)
     
-    c.execute('''CREATE TABLE IF NOT EXISTS Urheilijat (
-                 urheilija_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 etunimi TEXT NOT NULL,
-                 sukunimi TEXT NOT NULL,
-                 syntymapaiva DATE,
-                 syntymavuosi INTEGER,
-                 sukupuoli TEXT,
-                 seura_id INTEGER,
-                 FOREIGN KEY (seura_id) REFERENCES Seurat(seura_id))''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS Tulokset (
-                 tulos_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 laji_id INTEGER NOT NULL,
-                 urheilija_id INTEGER NOT NULL,
-                 sijoitus INTEGER,
-                 tulos REAL,
-                 reaktioaika REAL,
-                 tuuli REAL,
-                 lisatiedot TEXT,
-                 UNIQUE(laji_id, urheilija_id),
-                 FOREIGN KEY (laji_id) REFERENCES Lajit(laji_id),
-                 FOREIGN KEY (urheilija_id) REFERENCES Urheilijat(urheilija_id))''')
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS Tulokset (
+            tulos_id SERIAL PRIMARY KEY,
+            laji_id INTEGER NOT NULL,
+            urheilija_id INTEGER NOT NULL,
+            sijoitus INTEGER,
+            tulos REAL,
+            reaktioaika REAL,
+            tuuli REAL,
+            lisatiedot TEXT,
+            UNIQUE(laji_id, urheilija_id),
+            FOREIGN KEY (laji_id) REFERENCES Lajit(laji_id),
+            FOREIGN KEY (urheilija_id) REFERENCES Urheilijat(urheilija_id)
+        )
+    """)
     
     conn.commit()
     return conn
@@ -219,7 +233,6 @@ def parse_results(api_data, seura_filter=None):
     
     return event_name, results
 
-# Lisää tämä funktio tulosten_haku.py:n alkuun (esim. create_database() funktion jälkeen)
 def siisti_lajin_nimi(lajin_nimi):
     """Siistii lajin nimen poistamalla etuliitteet ja ylimääräiset tiedot"""
     if not lajin_nimi:
@@ -289,15 +302,14 @@ def siisti_lajin_nimi(lajin_nimi):
     
     return lajin_nimi.strip()
 
-# Muokkaa save_event_results funktiota (korvaa vanha lajin nimi käsittely):
 def save_event_results(conn, competition_id, event_id, event_name, results):
-    """Tallentaa tulokset tietokantaan ja päivittää last_updated-sarakkeen"""
+    """Tallentaa tulokset tietokantaan"""
     if not conn or not event_id or not event_name or not isinstance(results, list):
         return []
         
     c = conn.cursor()
     series = extract_series_from_event_name(event_name)
-    athletes_data = []
+    athletes_data = []  # Siirretään muuttujan määrittely tänne
     
     # Siistitään lajin nimi ennen tallennusta
     cleaned_event_name = siisti_lajin_nimi(event_name)
@@ -306,10 +318,15 @@ def save_event_results(conn, competition_id, event_id, event_name, results):
         # Hae kilpailun tiedot API:sta
         comp_info = fetch_competition_info(competition_id)
         
-        # 1. Varmista että kilpailu on olemassa (päivitä myös last_updated)
-        c.execute('''INSERT OR REPLACE INTO Kilpailut 
-                     (kilpailu_id, kilpailun_nimi, paikkakunta, alkupvm, loppupvm, last_updated) 
-                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)''',
+        # 1. Varmista että kilpailu on olemassa (päivitä myös muut tiedot)
+        c.execute('''INSERT INTO Kilpailut 
+                     (kilpailu_id, kilpailun_nimi, paikkakunta, alkupvm, loppupvm) 
+                     VALUES (%s, %s, %s, %s, %s)
+                     ON CONFLICT (kilpailu_id) DO UPDATE SET
+                     kilpailun_nimi = EXCLUDED.kilpailun_nimi,
+                     paikkakunta = EXCLUDED.paikkakunta,
+                     alkupvm = EXCLUDED.alkupvm,
+                     loppupvm = EXCLUDED.loppupvm''',
                   (int(competition_id), 
                    str(comp_info['Name']),
                    str(comp_info['Location']) if comp_info['Location'] else None,
@@ -317,9 +334,13 @@ def save_event_results(conn, competition_id, event_id, event_name, results):
                    comp_info['EndDate']))
         
         # 2. Lisää laji (käytä nyt siistittyä nimeä)
-        c.execute('''INSERT OR REPLACE INTO Lajit 
+        c.execute('''INSERT INTO Lajit 
                      (laji_id, kilpailu_id, lajin_nimi, sarja)
-                     VALUES (?, ?, ?, ?)''',
+                     VALUES (%s, %s, %s, %s)
+                     ON CONFLICT (laji_id) DO UPDATE SET
+                     kilpailu_id = EXCLUDED.kilpailu_id,
+                     lajin_nimi = EXCLUDED.lajin_nimi,
+                     sarja = EXCLUDED.sarja''',
                   (int(event_id), int(competition_id), str(cleaned_event_name), str(series) if series else None))
         
         for result in results:
@@ -331,8 +352,8 @@ def save_event_results(conn, competition_id, event_id, event_name, results):
             seura_id = None
             
             if seura_nimi:
-                c.execute('''INSERT OR IGNORE INTO Seurat (seura_nimi) VALUES (?)''', (str(seura_nimi),))
-                c.execute('SELECT seura_id FROM Seurat WHERE seura_nimi = ?', (str(seura_nimi),))
+                c.execute('''INSERT INTO Seurat (seura_nimi) VALUES (%s) ON CONFLICT (seura_nimi) DO NOTHING''', (str(seura_nimi),))
+                c.execute('SELECT seura_id FROM Seurat WHERE seura_nimi = %s', (str(seura_nimi),))
                 seura_row = c.fetchone()
                 seura_id = int(seura_row[0]) if seura_row and str(seura_row[0]).isdigit() else None
             
@@ -346,18 +367,19 @@ def save_event_results(conn, competition_id, event_id, event_name, results):
                 continue
                 
             # 5. Lisää urheilija
-            c.execute('''INSERT OR REPLACE INTO Urheilijat 
+            c.execute('''INSERT INTO Urheilijat 
                          (etunimi, sukunimi, sukupuoli, syntymavuosi, seura_id)
-                         VALUES (?, ?, ?, ?, ?)''',
+                         VALUES (%s, %s, %s, %s, %s)
+                         ON CONFLICT (etunimi, sukunimi) DO UPDATE SET
+                         sukupuoli = COALESCE(EXCLUDED.sukupuoli, Urheilijat.sukupuoli),
+                         syntymavuosi = COALESCE(EXCLUDED.syntymavuosi, Urheilijat.syntymavuosi),
+                         seura_id = COALESCE(EXCLUDED.seura_id, Urheilijat.seura_id)
+                         RETURNING urheilija_id''',
                       (str(etunimi), str(sukunimi), 
                        str(result.get('sukupuoli')) if result.get('sukupuoli') else None,
                        int(result.get('syntymavuosi')) if str(result.get('syntymavuosi', '')).isdigit() else None,
                        int(seura_id) if seura_id else None))
             
-            # 6. Hae urheilija_id
-            c.execute('''SELECT urheilija_id FROM Urheilijat 
-                         WHERE etunimi = ? AND sukunimi = ?''',
-                      (str(etunimi), str(sukunimi)))
             urheilija_row = c.fetchone()
             urheilija_id = int(urheilija_row[0]) if urheilija_row and str(urheilija_row[0]).isdigit() else None
             
@@ -367,14 +389,18 @@ def save_event_results(conn, competition_id, event_id, event_name, results):
                 
             # 7. Lisää tulos
             try:
-                c.execute('''INSERT OR REPLACE INTO Tulokset 
+                c.execute('''INSERT INTO Tulokset 
                              (laji_id, urheilija_id, sijoitus, tulos, lisatiedot)
-                             VALUES (?, ?, ?, ?, ?)''',
+                             VALUES (%s, %s, %s, %s, %s)
+                             ON CONFLICT (laji_id, urheilija_id) DO UPDATE SET
+                             sijoitus = EXCLUDED.sijoitus,
+                             tulos = EXCLUDED.tulos,
+                             lisatiedot = EXCLUDED.lisatiedot''',
                           (int(event_id), int(urheilija_id), 
                            int(result.get('sijoitus', 0)) if str(result.get('sijoitus', '0')).isdigit() else 0,
                            float(result.get('tulos')) if result.get('tulos') is not None else None,
                            str(result.get('tulos_teksti', ''))))
-            except (sqlite3.IntegrityError, ValueError) as e:
+            except (psycopg2.IntegrityError, ValueError) as e:
                 print(f"Virhe tuloksen lisäämisessä (laji_id={event_id}, urheilija_id={urheilija_id}): {str(e)}", file=sys.stderr)
                 continue
             
@@ -390,8 +416,8 @@ def save_event_results(conn, competition_id, event_id, event_name, results):
         conn.rollback()
         print(f"Virhe tallennettaessa tuloksia: {str(e)}", file=sys.stderr)
     
-    return athletes_data 
-
+    return athletes_data  # Palautetaan athletes_data riippumatta siitä onnistuiko try vai ei
+    
 def print_results_by_series(conn, competition_id, seura_filter=None):
     """Tulostaa tulokset ryhmiteltynä sarjoittain"""
     if not conn:
@@ -402,7 +428,7 @@ def print_results_by_series(conn, competition_id, seura_filter=None):
     try:
         # Hae kilpailun tiedot
         c.execute('''SELECT kilpailun_nimi, paikkakunta, alkupvm, loppupvm 
-                     FROM Kilpailut WHERE kilpailu_id = ?''', (int(competition_id),))
+                     FROM Kilpailut WHERE kilpailu_id = %s''', (int(competition_id),))
         competition_row = c.fetchone()
         
         # Jos tietoja ei ole tietokannassa, hae API:sta
@@ -415,8 +441,8 @@ def print_results_by_series(conn, competition_id, seura_filter=None):
             
             # Päivitä tietokanta
             c.execute('''UPDATE Kilpailut 
-                         SET kilpailun_nimi = ?, paikkakunta = ?, alkupvm = ?, loppupvm = ?
-                         WHERE kilpailu_id = ?''',
+                         SET kilpailun_nimi = %s, paikkakunta = %s, alkupvm = %s, loppupvm = %s
+                         WHERE kilpailu_id = %s''',
                       (str(competition_name), str(location) if location else None,
                        start_date, 
                        end_date,
@@ -429,10 +455,10 @@ def print_results_by_series(conn, competition_id, seura_filter=None):
         date_info = ""
         if start_date:
             try:
-                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                start_dt = datetime.strptime(str(start_date), '%Y-%m-%d')
                 start_str = start_dt.strftime('%d.%m.%Y')
                 if end_date and end_date != start_date:
-                    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                    end_dt = datetime.strptime(str(end_date), '%Y-%m-%d')
                     end_str = end_dt.strftime('%d.%m.%Y')
                     date_info = f" - {start_str}-{end_str}"
                 else:
@@ -451,14 +477,14 @@ def print_results_by_series(conn, competition_id, seura_filter=None):
         query = '''SELECT DISTINCT l.laji_id, l.lajin_nimi, l.sarja 
                    FROM Lajit l
                    JOIN Tulokset t ON l.laji_id = t.laji_id
-                   WHERE l.kilpailu_id = ?'''
+                   WHERE l.kilpailu_id = %s'''
         params = (int(competition_id),)
         
         if seura_filter:
             query += ''' AND t.urheilija_id IN (
                           SELECT u.urheilija_id FROM Urheilijat u
                           JOIN Seurat s ON u.seura_id = s.seura_id
-                          WHERE s.seura_nimi = ?)'''
+                          WHERE s.seura_nimi = %s)'''
             params = (int(competition_id), str(seura_filter))
         
         c.execute(query, params)
@@ -481,11 +507,11 @@ def print_results_by_series(conn, competition_id, seura_filter=None):
                        FROM Tulokset t
                        JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
                        LEFT JOIN Seurat s ON u.seura_id = s.seura_id
-                       WHERE t.laji_id = ?'''
+                       WHERE t.laji_id = %s'''
             params = (int(event_id),)
             
             if seura_filter:
-                query += ' AND s.seura_nimi = ?'
+                query += ' AND s.seura_nimi = %s'
                 params = (int(event_id), str(seura_filter))
             
             query += ' ORDER BY t.sijoitus'
@@ -517,7 +543,7 @@ def main():
     try:
         # Alusta tietokanta
         conn = create_database()
-        print(f"Tietokanta sijaitsee: {os.path.abspath(DATABASE_FILE)}", file=sys.stderr)
+        print(f"Tietokanta sijaitsee: {DATABASE_URL}", file=sys.stderr)
         
         # Hae kilpailun tiedot
         competition_info = fetch_competition_info(args.id)
@@ -584,7 +610,7 @@ def main():
         # Tulosta tulokset
         print_results_by_series(conn, args.id, args.seura)
         
-        print(f"\nTiedot tallennettu tietokantaan: {os.path.abspath(DATABASE_FILE)}")
+        print(f"\nTiedot tallennettu tietokantaan")
         
     except Exception as e:
         print(f"\nVIRHE: {str(e)}", file=sys.stderr)
