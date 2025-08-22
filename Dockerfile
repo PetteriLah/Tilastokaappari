@@ -10,7 +10,7 @@ RUN apt-get update && \
 
 # Kopioi ensin vaatimukset optimoidakseen kerroskäyttöä
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn && python init_db-py
+RUN pip install --no-cache-dir -r requirements.txt gunicorn 
 
 # Luo hakemistot ja kopioi loput tiedostot
 RUN mkdir -p /app/data /app/templates
@@ -26,5 +26,6 @@ CMD ["gunicorn", "-b", "0.0.0.0:10000", \
      "--max-requests", "50", \
      "--max-requests-jitter", "20", \
      "app:app"]
+
 
 
