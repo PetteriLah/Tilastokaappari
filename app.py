@@ -2,27 +2,24 @@ import threading
 import time
 from datetime import datetime, timedelta
 import os
-import sqlite3
+import psycopg2
 from flask import Flask, render_template, request, url_for, redirect, flash
 import subprocess
+from psycopg2.extras import DictCursor
 
 app = Flask(__name__)
 app.secret_key = 'salainen_avain'
 
-# Tietokannan asetukset
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
-DATABASE_FILE = os.path.join(DATA_DIR, "kilpailut.db")
-
-# Päivitystilan seuranta
-update_in_progress = False
-last_update_status = {"success": None, "message": ""}
+# Tietokannan asetukset - PostgreSQL
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db_connection():
-    conn = sqlite3.connect(DATABASE_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
+
+def get_db_cursor():
+    conn = get_db_connection()
+    return conn.cursor(cursor_factory=DictCursor)
 
 def get_last_update_time():
     """Hakee viimeisimmän päivitysajan tietokannasta"""
@@ -34,7 +31,7 @@ def get_last_update_time():
         conn.close()
         
         if result and result['last_update']:
-            return datetime.fromisoformat(result['last_update'])
+            return result['last_update']
         return datetime.min
     except Exception as e:
         app.logger.error(f"Päivitysajan hakuvirhe: {str(e)}")
@@ -55,7 +52,7 @@ def update_database_thread():
             current_time = datetime.now().isoformat()
             conn = get_db_connection()
             c = conn.cursor()
-            c.execute("UPDATE Kilpailut SET last_updated = ? WHERE last_updated = (SELECT MAX(last_updated) FROM Kilpailut)", 
+            c.execute("UPDATE Kilpailut SET last_updated = %s WHERE last_updated = (SELECT MAX(last_updated) FROM Kilpailut)", 
                      (current_time,))
             conn.commit()
             conn.close()
@@ -154,7 +151,7 @@ def index():
 @app.route('/kilpailut')
 def nayta_kilpailut():
     with get_db_connection() as conn:
-        c = conn.cursor()
+        c = conn.cursor(cursor_factory=DictCursor)
         c.execute("SELECT kilpailu_id, kilpailun_nimi, alkupvm FROM Kilpailut ORDER BY alkupvm DESC")
         kilpailut = c.fetchall()
     return render_template('kilpailut.html', kilpailut=kilpailut)
@@ -163,10 +160,10 @@ def nayta_kilpailut():
 @app.route('/kilpailu/<int:kilpailu_id>')
 def nayta_kilpailun_tulokset(kilpailu_id):
     conn = get_db_connection()
-    c = conn.cursor()
+    c = conn.cursor(cursor_factory=DictCursor)
     
     # Hae kilpailun perustiedot
-    c.execute("SELECT kilpailun_nimi, alkupvm, paikkakunta FROM Kilpailut WHERE kilpailu_id = ?", (kilpailu_id,))
+    c.execute("SELECT kilpailun_nimi, alkupvm, paikkakunta FROM Kilpailut WHERE kilpailu_id = %s", (kilpailu_id,))
     kilpailu = c.fetchone()
     
     if not kilpailu:
@@ -177,7 +174,7 @@ def nayta_kilpailun_tulokset(kilpailu_id):
     c.execute("""
         SELECT laji_id, lajin_nimi, sarja 
         FROM Lajit 
-        WHERE kilpailu_id = ?
+        WHERE kilpailu_id = %s
         ORDER BY lajin_nimi
     """, (kilpailu_id,))
     lajit = c.fetchall()
@@ -193,7 +190,7 @@ def nayta_kilpailun_tulokset(kilpailu_id):
             FROM Tulokset t
             JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
             LEFT JOIN Seurat s ON u.seura_id = s.seura_id
-            WHERE t.laji_id = ?
+            WHERE t.laji_id = %s
             ORDER BY t.sijoitus
         """, (laji['laji_id'],))
         tulokset[laji['laji_id']] = c.fetchall()
@@ -216,7 +213,7 @@ def hae_urheilijan_tulokset():
         return render_template('error.html', message='Anna urheilijan nimi'), 400
     
     conn = get_db_connection()
-    c = conn.cursor()
+    c = conn.cursor(cursor_factory=DictCursor)
     
     # Muodosta SQL-kysely dynaamisesti suodattimien perusteella
     sql = """
@@ -227,13 +224,13 @@ def hae_urheilijan_tulokset():
         JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
         JOIN Lajit l ON t.laji_id = l.laji_id
         JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
-        WHERE (u.etunimi LIKE ? OR u.sukunimi LIKE ? OR (u.etunimi || ' ' || u.sukunimi) LIKE ?)
+        WHERE (u.etunimi LIKE %s OR u.sukunimi LIKE %s OR (u.etunimi || ' ' || u.sukunimi) LIKE %s)
     """
     params = [f'%{nimi}%', f'%{nimi}%', f'%{nimi}%']
     
     # Lisää sukupuoli-suodatin jos annettu
     if sukupuoli in ['M', 'N']:
-        sql += " AND u.sukupuoli = ?"
+        sql += " AND u.sukupuoli = %s"
         params.append(sukupuoli)
     
     # Lisää ikäsuodattimet jos annettu
@@ -241,13 +238,13 @@ def hae_urheilijan_tulokset():
         sql += " AND k.alkupvm IS NOT NULL AND u.syntymavuosi IS NOT NULL"
         
         if ika_min is not None and ika_max is not None:
-            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi BETWEEN ? AND ?"
+            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi BETWEEN %s AND %s"
             params.extend([ika_min, ika_max])
         elif ika_min is not None:
-            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi >= ?"
+            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi >= %s"
             params.append(ika_min)
         elif ika_max is not None:
-            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi <= ?"
+            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi <= %s"
             params.append(ika_max)
     
     sql += " ORDER BY k.alkupvm DESC, l.lajin_nimi"
@@ -285,7 +282,7 @@ def hae_lajin_parhaat_tulokset():
         jarjestys = "ASC"  # Pienempi tulos on parempi
     
     conn = get_db_connection()
-    c = conn.cursor()
+    c = conn.cursor(cursor_factory=DictCursor)
     
     # Muodosta SQL-kysely
     sql = """
@@ -301,58 +298,58 @@ def hae_lajin_parhaat_tulokset():
                 u.syntymavuosi, 
                 u.sukupuoli,
                 t.sijoitus,
-                CASE WHEN t.tulos GLOB '*[0-9]*:[0-9]*' THEN
-                    CAST(substr(t.tulos, 1, instr(t.tulos, ':')-1) AS INTEGER) * 60 + 
-                    CAST(substr(t.tulos, instr(t.tulos, ':')+1) AS INTEGER)
-                WHEN t.tulos GLOB '*[0-9]*.*[0-9]*' THEN
-                    CAST(t.tulos AS REAL)
+                CASE WHEN t.tulos ~ '[0-9]+:[0-9]+' THEN
+                    CAST(SPLIT_PART(t.tulos, ':', 1) AS INTEGER) * 60 + 
+                    CAST(SPLIT_PART(t.tulos, ':', 2) AS NUMERIC)
+                WHEN t.tulos ~ '[0-9]+\\.[0-9]+' THEN
+                    CAST(t.tulos AS NUMERIC)
                 ELSE
-                    CASE WHEN ? = 'ASC' THEN 999999 ELSE -999999 END
+                    CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
                 END AS tulos_numero,
                 ROW_NUMBER() OVER (
                     PARTITION BY u.urheilija_id 
                     ORDER BY 
-                        CASE WHEN t.tulos GLOB '*[0-9]*:[0-9]*' THEN
-                            CAST(substr(t.tulos, 1, instr(t.tulos, ':')-1) AS INTEGER) * 60 + 
-                            CAST(substr(t.tulos, instr(t.tulos, ':')+1) AS INTEGER)
-                        WHEN t.tulos GLOB '*[0-9]*.*[0-9]*' THEN
-                            CAST(t.tulos AS REAL)
+                        CASE WHEN t.tulos ~ '[0-9]+:[0-9]+' THEN
+                            CAST(SPLIT_PART(t.tulos, ':', 1) AS INTEGER) * 60 + 
+                            CAST(SPLIT_PART(t.tulos, ':', 2) AS NUMERIC)
+                        WHEN t.tulos ~ '[0-9]+\\.[0-9]+' THEN
+                            CAST(t.tulos AS NUMERIC)
                         ELSE
-                            CASE WHEN ? = 'ASC' THEN 999999 ELSE -999999 END
-                        END {0}
+                            CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
+                        END
                 ) AS rn
             FROM Urheilijat u
             JOIN Tulokset t ON u.urheilija_id = t.urheilija_id
             LEFT JOIN Seurat s ON u.seura_id = s.seura_id
             JOIN Lajit l ON t.laji_id = l.laji_id
             JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
-            WHERE l.lajin_nimi LIKE ? AND t.tulos != 'DNS' AND t.tulos != 'DNF'
-    """.format(jarjestys)
+            WHERE l.lajin_nimi LIKE %s AND t.tulos != 'DNS' AND t.tulos != 'DNF'
+    """
     
     params = [jarjestys, jarjestys, f'%{laji}%']
     
     # Lisää sukupuoli-suodatin
     if sukupuoli in ['M', 'N']:
-        sql += " AND u.sukupuoli = ?"
+        sql += " AND u.sukupuoli = %s"
         params.append(sukupuoli)
     
     # Lisää vuosi-suodatin
     if vuosi is not None:
-        sql += " AND strftime('%Y', k.alkupvm) = ?"
-        params.append(str(vuosi))
+        sql += " AND EXTRACT(YEAR FROM k.alkupvm) = %s"
+        params.append(vuosi)
     
     # Lisää ikäsuodattimet
     if ika_min is not None or ika_max is not None:
         sql += " AND k.alkupvm IS NOT NULL AND u.syntymavuosi IS NOT NULL"
         
         if ika_min is not None and ika_max is not None:
-            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi BETWEEN ? AND ?)"
+            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi BETWEEN %s AND %s)"
             params.extend([ika_min, ika_max])
         elif ika_min is not None:
-            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi >= ?)"
+            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi >= %s)"
             params.append(ika_min)
         elif ika_max is not None:
-            sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi <= ?)"
+            sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi <= %s)"
             params.append(ika_max)
     
     sql += """
@@ -369,14 +366,14 @@ def hae_lajin_parhaat_tulokset():
             sijoitus
         FROM ParhaatTulokset
         WHERE rn = 1
-        ORDER BY tulos_numero {0}
+        ORDER BY tulos_numero
         LIMIT 50
-    """.format(jarjestys)
+    """
     
     try:
         c.execute(sql, params)
         tulokset = c.fetchall()
-    except sqlite3.OperationalError as e:
+    except psycopg2.OperationalError as e:
         conn.close()
         app.logger.error(f"SQL virhe: {str(e)}")
         app.logger.error(f"SQL-kysely: {sql}")
@@ -385,7 +382,7 @@ def hae_lajin_parhaat_tulokset():
     
     # Hae saatavilla olevat vuodet valikkoon
     c.execute("""
-        SELECT DISTINCT strftime('%Y', alkupvm) as vuosi
+        SELECT DISTINCT EXTRACT(YEAR FROM alkupvm) as vuosi
         FROM Kilpailut
         WHERE alkupvm IS NOT NULL
         ORDER BY vuosi DESC
@@ -412,7 +409,7 @@ def listaa_urheilijat():
     current_year = datetime.now().year
     
     conn = get_db_connection()
-    c = conn.cursor()
+    c = conn.cursor(cursor_factory=DictCursor)
     
     sql = """
         SELECT 
@@ -428,7 +425,7 @@ def listaa_urheilijat():
     params = []
     
     if sukupuoli in ['M', 'N']:
-        sql += " AND sukupuoli = ?"
+        sql += " AND sukupuoli = %s"
         params.append(sukupuoli)
     
     sql += " AND sukupuoli IS NOT NULL AND syntymavuosi IS NOT NULL"
@@ -466,7 +463,7 @@ def listaa_urheilijat():
 @app.route('/lajit')
 def listaa_lajit():
     conn = get_db_connection()
-    c = conn.cursor()
+    c = conn.cursor(cursor_factory=DictCursor)
     
     c.execute("""
         SELECT DISTINCT lajin_nimi 
@@ -480,14 +477,14 @@ def listaa_lajit():
     return render_template('lajit.html', lajit=lajit)
 
 if __name__ == '__main__':
-    # Varmista että tietokanta on olemassa
-    if not os.path.exists(DATABASE_FILE):
-        print("Tietokantaa ei löydy! Alustetaan...")
-        # Tässä pitäisi olla logiikka tietokannan alustamiseksi
-        # Mutta tämä on vain esimerkki, joten jätetään toteuttamatta
-        print("Tietokannan alustus ei ole toteutettu tässä esimerkissä")
+    # Tarkista tietokantayhteys
+    try:
+        conn = get_db_connection()
+        conn.close()
+        print("Tietokantayhteys toimii!")
+    except Exception as e:
+        print(f"Tietokantayhteysvirhe: {str(e)}")
         exit(1)
     
-    # Käynnistä suoraan Gunicornilla Fly.io:ssa
-    # (Dockerfile määrittää jo oikean käynnistyskomennon)
+    # Käynnistä suoraan Gunicornilla Renderissä
     app.run(host='0.0.0.0', port=10000, debug=False)
