@@ -389,7 +389,9 @@ def hae_lajin_parhaat_tulokset():
                 LEFT JOIN Seurat s ON u.seura_id = s.seura_id
                 JOIN Lajit l ON t.laji_id = l.laji_id
                 JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
-                WHERE l.lajin_nimi ILIKE %s AND t.tulos != 'DNS' AND t.tulos != 'DNF'
+                WHERE l.lajin_nimi ILIKE %s 
+                AND CAST(t.tulos AS TEXT) != 'DNS' 
+                AND CAST(t.tulos AS TEXT) != 'DNF'
         """
         
         params = [jarjestys, jarjestys, f'%{laji}%']
@@ -472,7 +474,7 @@ def hae_lajin_parhaat_tulokset():
     except Exception as e:
         app.logger.error(f"Lajin parhaiden tulosten hakuvirhe: {str(e)}")
         return render_template('error.html', message='Tietokantavirhe'), 500
-
+        
 @app.route('/urheilijat')
 def listaa_urheilijat():
     sukupuoli = request.args.get('sukupuoli', '').upper()
