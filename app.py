@@ -88,11 +88,16 @@ def update_database_thread():
     finally:
         app.update_in_progress = False
 
+# Korvaa check_db_update-funktio tällä:
 def check_db_update():
     """Tarkistaa päivitysajan ja käynnistää taustapäivityksen tarvittaessa"""
     
+    # Alusta g-objektiin tarvittaessa
+    if not hasattr(g, 'update_in_progress'):
+        g.update_in_progress = False
+    
     # Älä päivitä jos päivitys on jo meneillään
-    if app.update_in_progress:
+    if g.update_in_progress:
         app.logger.info("Päivitys on jo meneillään")
         return
         
@@ -104,7 +109,7 @@ def check_db_update():
         if datetime.now() - last_update > timedelta(days=1):
             # Käynnistä taustasäie
             thread = threading.Thread(target=update_database_thread)
-            thread.daemon = True  # Säie sammuu kun pääohjelma sammuu
+            thread.daemon = True
             thread.start()
             app.logger.info("Taustapäivitys käynnistetty")
             
