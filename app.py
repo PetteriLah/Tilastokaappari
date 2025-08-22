@@ -92,7 +92,7 @@ def update_database_thread():
 
 def check_db_update():
     """Tarkistaa päivitysajan ja käynnistää taustapäivityksen tarvittaessa"""
-    global update_in_progress
+    global update_in_progress  # Lisätty global-määritys
     
     # Älä päivitä jos päivitys on jo meneillään
     if update_in_progress:
@@ -117,7 +117,7 @@ def check_db_update():
 @app.route('/paivita_tietokanta')
 def paivita_tietokanta():
     """Manuaalinen tietokannan päivitys taustalla"""
-    global update_in_progress
+    global update_in_progress  # Lisätty global-määritys
     
     if update_in_progress:
         flash('Päivitys on jo meneillään', 'info')
@@ -156,6 +156,8 @@ def inject_template_vars():
         'update_in_progress': update_in_progress,
         'last_update_status': last_update_status
     }
+
+# ... loput koodisi pysyvät ennallaan
 
 # Loput reitit pysyvät ennallaan...
 @app.route('/')
