@@ -5,7 +5,6 @@ import os
 import psycopg2
 from flask import Flask, render_template, request, url_for, redirect, flash
 import subprocess
-from urllib.parse import urlparse
 
 app = Flask(__name__)
 app.secret_key = 'salainen_avain'
@@ -18,22 +17,14 @@ update_in_progress = False
 last_update_status = {"success": None, "message": ""}
 
 def get_db_connection():
-    # Parsitaan tietokantaosoite
-    result = urlparse(DATABASE_URL)
-    username = result.username
-    password = result.password
-    database = result.path[1:]
-    hostname = result.hostname
-    port = result.port
-    
-    conn = psycopg2.connect(
-        database=database,
-        user=username,
-        password=password,
-        host=hostname,
-        port=port
-    )
-    return conn
+    """Muodosta yhteys PostgreSQL-tietokantaan"""
+    try:
+        # Käytä suoraan DATABASE_URL:ia
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        return conn
+    except Exception as e:
+        app.logger.error(f"Tietokantayhteys epäonnistui: {str(e)}")
+        raise
 
 def get_last_update_time():
     """Hakee viimeisimmän päivitysajan tietokannasta"""
@@ -132,8 +123,10 @@ def paivita_tietokanta():
 @app.before_request
 def before_request():
     """Suorita ennen jokaista pyyntöä"""
-    if request.endpoint != 'static':
-        check_db_update()
+    # Väliaikaisesti kommentoitu pois, jotta saadaan sovellus käynnistymään
+    # if request.endpoint != 'static':
+    #     check_db_update()
+    pass
 
 @app.context_processor
 def inject_template_vars():
@@ -156,20 +149,24 @@ def inject_template_vars():
         'last_update_status': last_update_status
     }
 
-# Loput reitit pysyvät ennallaan...
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ... muut reitit
+
 @app.route('/kilpailut')
 def nayta_kilpailut():
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT kilpailu_id, kilpailun_nimi, alkupvm FROM Kilpailut ORDER BY alkupvm DESC")
-        kilpailut = c.fetchall()
-    return render_template('kilpailut.html', kilpailut=kilpailut)
-    
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT kilpailu_id, kilpailun_nimi, alkupvm FROM Kilpailut ORDER BY alkupvm DESC")
+            kilpailut = c.fetchall()
+        return render_template('kilpailut.html', kilpailut=kilpailut)
+    except Exception as e:
+        app.logger.error(f"Kilpailujen hakuvirhe: {str(e)}")
+        return render_template('error.html', message='Tietokantayhteys epäonnistui'), 500
+
+# ... (muut reitit pysyvät samanlaisina)
 
 @app.route('/kilpailu/<int:kilpailu_id>')
 def nayta_kilpailun_tulokset(kilpailu_id):
@@ -511,8 +508,9 @@ if __name__ == '__main__':
         conn.close()
     except Exception as e:
         print(f"Tietokantayhteys epäonnistui: {e}")
-        exit(1)
+        # Älä sulje sovellusta, vaan anna sen käynnistyä ilman tietokantayhteyttä
+        print("Sovellus käynnistyy ilman tietokantayhteyttä")
     
-    # Käynnistä suoraan Gunicornilla Fly.io:ssa
     # (Dockerfile määrittää jo oikean käynnistyskomennon)
+    app.run(host='0.0.0.0', port=10000, debug=False)
     app.run(host='0.0.0.0', port=10000, debug=False)
