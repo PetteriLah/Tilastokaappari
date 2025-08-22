@@ -13,6 +13,10 @@ app.secret_key = 'salainen_avain'
 # Tietokannan asetukset - PostgreSQL
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
+# Päivitystilan seuranta - ALUSTA NÄMÄ GLOBAALIT MUUTTUJAT
+update_in_progress = False
+last_update_status = {"success": None, "message": ""}
+
 def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL)
     return conn
