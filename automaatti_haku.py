@@ -1,5 +1,5 @@
 import requests
-import sqlite3
+import psycopg2
 import subprocess
 import os
 import time
@@ -7,13 +7,13 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 # Asetukset
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-DATABASE_FILE = os.path.join(DATA_DIR, "kilpailut.db")
-API_URL = "https://cached-public-api.tuloslista.com/live/v1/competition"
+DATABASE_URL = os.environ.get('DATABASE_URL')
 FIXED_ORGANIZATION = "Noormarkun Nopsa"
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # sekuntia
+
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
 def log_message(message, level="INFO"):
     """Yksinkertainen lokitusfunktio"""
@@ -21,17 +21,17 @@ def log_message(message, level="INFO"):
     print(f"[{timestamp}] [{level}] {message}")
 
 def is_already_processed(event_id):
-    """Tarkistaa onko kilpailu jo olemassa kilpailut.db:ssä"""
+    """Tarkistaa onko kilpailu jo olemassa tietokannassa"""
     try:
-        conn = sqlite3.connect(DATABASE_FILE)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # Tarkista onko kilpailu jo tietokannassa
-        cursor.execute("SELECT kilpailu_id FROM Kilpailut WHERE kilpailu_id = ?", (event_id,))
+        cursor.execute("SELECT kilpailu_id FROM Kilpailut WHERE kilpailu_id = %s", (event_id,))
         
         result = cursor.fetchone()
         return result is not None
-    except sqlite3.Error as e:
+    except psycopg2.Error as e:
         log_message(f"Tietokantavirhe tapahtuman {event_id} tarkistuksessa: {str(e)}", "ERROR")
         return False
     finally:
@@ -41,18 +41,18 @@ def is_already_processed(event_id):
 def update_last_updated(event_id):
     """Päivittää kilpailun viimeisimmän päivitysajan"""
     try:
-        conn = sqlite3.connect(DATABASE_FILE)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
             UPDATE Kilpailut 
             SET last_updated = CURRENT_TIMESTAMP 
-            WHERE kilpailu_id = ?
+            WHERE kilpailu_id = %s
         """, (event_id,))
         
         conn.commit()
         log_message(f"Päivitetty last_updated kilpailulle {event_id}", "DEBUG")
-    except sqlite3.Error as e:
+    except psycopg2.Error as e:
         log_message(f"Virhe last_updated päivityksessä: {str(e)}", "ERROR")
     finally:
         if 'conn' in locals():
@@ -62,7 +62,7 @@ def fetch_events():
     """Hakee tapahtumat rajapinnasta"""
     try:
         log_message("Haetaan tapahtumia rajapinnasta...")
-        response = requests.get(API_URL, timeout=15)
+        response = requests.get("https://cached-public-api.tuloslista.com/live/v1/competition", timeout=15)
         response.raise_for_status()
         events = response.json()
         log_message(f"Haettu {len(events)} tapahtumaa rajapinnasta")
@@ -157,7 +157,7 @@ def process_event(event):
         log_message(f"Tapahtuma {event_id} ({event_name}) ohitettu - tulevaisuudessa", "DEBUG")
         return
     
-    # 2. Tarkista onko kilpailu JO OLEMASSA kilpailut.db:ssä
+    # 2. Tarkista onko kilpailu JO OLEMASSA tietokannassa
     if is_already_processed(event_id):
         log_message(f"Tapahtuma {event_id} ({event_name}) ohitettu - kilpailu on jo tietokannassa", "DEBUG")
         return
