@@ -542,7 +542,6 @@ def listaa_urheilijat():
     except Exception as e:
         app.logger.error(f"Urheilijoiden hakuvirhe: {str(e)}")
         return render_template('error.html', message='Tietokantavirhe'), 500
-
 @app.route('/lajit')
 def listaa_lajit():
     try:
@@ -555,14 +554,13 @@ def listaa_lajit():
             ORDER BY lajin_nimi
         """)
         lajit_results = c.fetchall()
-        lajit = [r[0] for r in lajit_results]
+        
+        # Muunnetaan sanakirjoiksi
+        lajit = [{'lajin_nimi': r[0]} for r in lajit_results]
         
         conn.close()
         
         return render_template('lajit.html', lajit=lajit)
-    except Exception as e:
-        app.logger.error(f"Lajien hakuvirhe: {str(e)}")
-        return render_template('error.html', message='Tietokantavirhe'), 500
 
 if __name__ == '__main__':
     if not DATABASE_URL:
