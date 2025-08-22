@@ -58,7 +58,7 @@
                         <td>{{ tulos['tulos'] }}</td>
                         <td>
                             {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
-                                {{ tulos['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
+                                {{ tulos['alkupvm'].year - tulos['syntymavuosi'] }}v
                             {% endif %}
                         </td>
                         <td>
