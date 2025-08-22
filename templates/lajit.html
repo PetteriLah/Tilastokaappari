@@ -7,18 +7,18 @@
 
 {% if lajit %}
     <div class="row">
-        {% for laji in lajit %}
-            <div class="col-md-4 mb-3">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">{{ laji['lajin_nimi'] }}</h5>
-                        <a href="{{ url_for('hae_lajin_parhaat_tulokset', laji=laji['lajin_nimi']) }}" class="btn btn-sm btn-primary">
-                            Näytä parhaat tulokset
-                        </a>
-                    </div>
-                </div>
-            </div>
-        {% endfor %}
+		{% for laji in lajit %}
+			<div class="col-md-4 mb-3">
+				<div class="card">
+					<div class="card-body">
+						<h5 class="card-title">{{ laji }}</h5>  <!-- Muuta tähän -->
+						<a href="{{ url_for('hae_lajin_parhaat_tulokset', laji=laji) }}" class="btn btn-sm btn-primary">
+							Näytä parhaat tulokset
+						</a>
+					</div>
+				</div>
+			</div>
+		{% endfor %}
     </div>
 {% else %}
     <div class="alert alert-warning">Ei lajeja tietokannassa.</div>
