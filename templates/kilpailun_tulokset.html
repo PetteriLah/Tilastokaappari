@@ -33,11 +33,11 @@
 											{{ tulos['etunimi'] }} {{ tulos['sukunimi'] }}  </a></td>
                                         <td>{{ tulos['seura'] }}</td>
                                         <td>{{ tulos['tulos'] }}</td>
-                                        <td>
-                                            {% if tulos['syntymavuosi'] and kilpailu['alkupvm'] %}
-                                                {{ kilpailu['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
-                                            {% endif %}
-                                        </td>
+										<td>
+										    {% if tulos['syntymavuosi'] and kilpailu['alkupvm'] %}
+										        {{ kilpailu['alkupvm'].year - tulos['syntymavuosi'] }}v
+										    {% endif %}
+										</td>
                                         <td>
                                             {% if tulos['sukupuoli'] %}
                                                 {% if tulos['sukupuoli'].upper() == 'M' %}Mies{% else %}Nainen{% endif %}
