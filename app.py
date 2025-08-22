@@ -363,10 +363,10 @@ def hae_lajin_parhaat_tulokset():
                     u.sukupuoli,
                     t.sijoitus,
                     CASE 
-                        WHEN t.tulos ~ '^[0-9]+:[0-9]+([.][0-9]+)?$' THEN
-                            CAST(SPLIT_PART(t.tulos, ':', 1) AS INTEGER) * 60 + 
-                            CAST(SPLIT_PART(t.tulos, ':', 2) AS NUMERIC)
-                        WHEN t.tulos ~ '^[0-9]+([.][0-9]+)?$' THEN
+                        WHEN CAST(t.tulos AS TEXT) ~ '^[0-9]+:[0-9]+([.][0-9]+)?$' THEN
+                            CAST(SPLIT_PART(CAST(t.tulos AS TEXT), ':', 1) AS INTEGER) * 60 + 
+                            CAST(SPLIT_PART(CAST(t.tulos AS TEXT), ':', 2) AS NUMERIC)
+                        WHEN CAST(t.tulos AS TEXT) ~ '^[0-9]+([.][0-9]+)?$' THEN
                             CAST(t.tulos AS NUMERIC)
                         ELSE
                             CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
@@ -375,10 +375,10 @@ def hae_lajin_parhaat_tulokset():
                         PARTITION BY u.urheilija_id 
                         ORDER BY 
                             CASE 
-                                WHEN t.tulos ~ '^[0-9]+:[0-9]+([.][0-9]+)?$' THEN
-                                    CAST(SPLIT_PART(t.tulos, ':', 1) AS INTEGER) * 60 + 
-                                    CAST(SPLIT_PART(t.tulos, ':', 2) AS NUMERIC)
-                                WHEN t.tulos ~ '^[0-9]+([.][0-9]+)?$' THEN
+                                WHEN CAST(t.tulos AS TEXT) ~ '^[0-9]+:[0-9]+([.][0-9]+)?$' THEN
+                                    CAST(SPLIT_PART(CAST(t.tulos AS TEXT), ':', 1) AS INTEGER) * 60 + 
+                                    CAST(SPLIT_PART(CAST(t.tulos AS TEXT), ':', 2) AS NUMERIC)
+                                WHEN CAST(t.tulos AS TEXT) ~ '^[0-9]+([.][0-9]+)?$' THEN
                                     CAST(t.tulos AS NUMERIC)
                                 ELSE
                                     CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
