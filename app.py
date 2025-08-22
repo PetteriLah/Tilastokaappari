@@ -218,7 +218,7 @@ def nayta_kilpailun_tulokset(kilpailu_id):
             c.execute("""
                 SELECT t.sijoitus, u.etunimi, u.sukunimi, 
                        COALESCE(s.seura_nimi, '-') as seura, 
-                       COALESCE(t.tulos, t.lisatiedot) as tulos,
+                       COALESCE(CAST(t.tulos AS TEXT), t.lisatiedot) as tulos,
                        u.syntymavuosi, u.sukupuoli
                 FROM Tulokset t
                 JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
