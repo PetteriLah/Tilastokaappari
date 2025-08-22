@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta
 import os
 import psycopg2
-from flask import Flask, render_template, request, url_for, redirect, flash
+from flask import Flask, render_template, request, url_for, redirect, flash, g
 import subprocess
 from psycopg2.extras import DictCursor
 
@@ -13,9 +13,9 @@ app.secret_key = 'salainen_avain'
 # Tietokannan asetukset - PostgreSQL
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# Päivitystilan seuranta - ALUSTA NÄMÄ GLOBAALIT MUUTTUJAT
-update_in_progress = False
-last_update_status = {"success": None, "message": ""}
+# Päivitystilan seuranta - NÄMÄ SIIRRETÄÄN app.context:iin
+# update_in_progress = False
+# last_update_status = {"success": None, "message": ""}
 
 def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL)
@@ -43,48 +43,53 @@ def get_last_update_time():
 
 def update_database_thread():
     """Suorita tietokannan päivitys taustasäikeessä"""
-    global update_in_progress, last_update_status
-    
-    update_in_progress = True
-    try:
-        app.logger.info("Taustapäivitys alkoi")
-        result = subprocess.run(['python', 'automaatti_haku.py'], 
-                              capture_output=True, text=True, timeout=3600)  # 1h timeout
+    # Käytetään app-contextia globaalien muuttujien sijaan
+    with app.app_context():
+        app.config.update({'update_in_progress': True})
+        
+        try:
+            app.logger.info("Taustapäivitys alkoi")
+            result = subprocess.run(['python', 'automaatti_haku.py'], 
+                                  capture_output=True, text=True, timeout=3600)  # 1h timeout
 
-        if result.returncode == 0:
-            # Päivitetään viimeisin päivitysaika tietokantaan
-            current_time = datetime.now().isoformat()
-            conn = get_db_connection()
-            c = conn.cursor()
-            c.execute("UPDATE Kilpailut SET last_updated = %s WHERE last_updated = (SELECT MAX(last_updated) FROM Kilpailut)", 
-                     (current_time,))
-            conn.commit()
-            conn.close()
-            
-            last_update_status = {"success": True, "message": "Tietokanta päivitetty onnistuneesti!"}
-            app.logger.info("Taustapäivitys valmis")
-        else:
-            error_msg = f"Päivitys epäonnistui: {result.stderr}"
-            last_update_status = {"success": False, "message": error_msg}
+            if result.returncode == 0:
+                # Päivitetään viimeisin päivitysaika tietokantaan
+                current_time = datetime.now().isoformat()
+                conn = get_db_connection()
+                c = conn.cursor()
+                c.execute("UPDATE Kilpailut SET last_updated = %s WHERE last_updated = (SELECT MAX(last_updated) FROM Kilpailut)", 
+                         (current_time,))
+                conn.commit()
+                conn.close()
+                
+                app.config.update({'last_update_status': {"success": True, "message": "Tietokanta päivitetty onnistuneesti!"}})
+                app.logger.info("Taustapäivitys valmis")
+            else:
+                error_msg = f"Päivitys epäonnistui: {result.stderr}"
+                app.config.update({'last_update_status': {"success": False, "message": error_msg}})
+                app.logger.error(error_msg)
+                
+        except subprocess.TimeoutExpired:
+            error_msg = "Päivitys aikakatkaistiin (yli 1 tunti)"
+            app.config.update({'last_update_status': {"success": False, "message": error_msg}})
             app.logger.error(error_msg)
-            
-    except subprocess.TimeoutExpired:
-        error_msg = "Päivitys aikakatkaistiin (yli 1 tunti)"
-        last_update_status = {"success": False, "message": error_msg}
-        app.logger.error(error_msg)
-    except Exception as e:
-        error_msg = f"Päivitysprosessi epäonnistui: {str(e)}"
-        last_update_status = {"success": False, "message": error_msg}
-        app.logger.error(error_msg)
-    finally:
-        update_in_progress = False
+        except Exception as e:
+            error_msg = f"Päivitysprosessi epäonnistui: {str(e)}"
+            app.config.update({'last_update_status': {"success": False, "message": error_msg}})
+            app.logger.error(error_msg)
+        finally:
+            app.config.update({'update_in_progress': False})
 
 def check_db_update():
     """Tarkistaa päivitysajan ja käynnistää taustapäivityksen tarvittaessa"""
-    global update_in_progress  # TÄRKEÄ: Lisätään global-määritys
+    # Alusta konfiguraatio tarvittaessa
+    if 'update_in_progress' not in app.config:
+        app.config.update({'update_in_progress': False})
+    if 'last_update_status' not in app.config:
+        app.config.update({'last_update_status': {"success": None, "message": ""}})
     
     # Älä päivitä jos päivitys on jo meneillään
-    if update_in_progress:
+    if app.config['update_in_progress']:
         app.logger.info("Päivitys on jo meneillään")
         return
         
@@ -106,9 +111,11 @@ def check_db_update():
 @app.route('/paivita_tietokanta')
 def paivita_tietokanta():
     """Manuaalinen tietokannan päivitys taustalla"""
-    global update_in_progress
+    # Alusta konfiguraatio tarvittaessa
+    if 'update_in_progress' not in app.config:
+        app.config.update({'update_in_progress': False})
     
-    if update_in_progress:
+    if app.config['update_in_progress']:
         flash('Päivitys on jo meneillään', 'info')
     else:
         # Käynnistä taustapäivitys
@@ -122,13 +129,23 @@ def paivita_tietokanta():
 @app.before_request
 def before_request():
     """Suorita ennen jokaista pyyntöä"""
+    # Alusta konfiguraatio tarvittaessa
+    if 'update_in_progress' not in app.config:
+        app.config.update({'update_in_progress': False})
+    if 'last_update_status' not in app.config:
+        app.config.update({'last_update_status': {"success": None, "message": ""}})
+    
     if request.endpoint != 'static':
         check_db_update()
 
 @app.context_processor
 def inject_template_vars():
     """Lisää yhteiset muuttujat kaikille templateille"""
-    global update_in_progress, last_update_status
+    # Alusta konfiguraatio tarvittaessa
+    if 'update_in_progress' not in app.config:
+        app.config.update({'update_in_progress': False})
+    if 'last_update_status' not in app.config:
+        app.config.update({'last_update_status': {"success": None, "message": ""}})
     
     last_update = None
     last_update_dt = get_last_update_time()
@@ -142,8 +159,8 @@ def inject_template_vars():
         'current_year': datetime.now().year,
         'db_last_update': last_update,
         'db_needs_update': needs_update,
-        'update_in_progress': update_in_progress,
-        'last_update_status': last_update_status
+        'update_in_progress': app.config['update_in_progress'],
+        'last_update_status': app.config['last_update_status']
     }
 
 # Loput reitit pysyvät ennallaan...
@@ -481,6 +498,12 @@ def listaa_lajit():
     return render_template('lajit.html', lajit=lajit)
 
 if __name__ == '__main__':
+    # Alusta konfiguraatio
+    app.config.update({
+        'update_in_progress': False,
+        'last_update_status': {"success": None, "message": ""}
+    })
+    
     # Tarkista tietokantayhteys
     try:
         conn = get_db_connection()
