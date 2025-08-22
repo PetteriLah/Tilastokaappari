@@ -81,7 +81,7 @@ def update_database_thread():
 
 def check_db_update():
     """Tarkistaa päivitysajan ja käynnistää taustapäivityksen tarvittaessa"""
-    global update_in_progress
+    global update_in_progress  # LISÄTÄÄN TÄMÄ RIVI
     
     # Älä päivitä jos päivitys on jo meneillään
     if update_in_progress:
