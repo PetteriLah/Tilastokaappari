@@ -1,8 +1,10 @@
-import sqlite3
+import psycopg2
 from datetime import datetime
 import re
 from collections import defaultdict
 import logging
+import os
+from psycopg2.extras import DictCursor
 
 # Logituksen asetukset
 logging.basicConfig(
@@ -14,13 +16,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Tietokantayhteys
-DATABASE_FILE = "data/kilpailut.db"
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
 def get_athlete_data(urheilija_id):
     """Hakee urheilijan kaikki tiedot tietokannasta"""
     logger.debug(f"Haetaan urheilijan {urheilija_id} tiedot")
-    conn = sqlite3.connect(DATABASE_FILE)
-    cursor = conn.cursor()
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=DictCursor)
     
     try:
         # Hae urheilijan perustiedot
@@ -28,7 +33,7 @@ def get_athlete_data(urheilija_id):
             SELECT urheilija_id, etunimi, sukunimi, 
                    syntymapaiva, syntymavuosi, sukupuoli, seura_id
             FROM Urheilijat 
-            WHERE urheilija_id = ?
+            WHERE urheilija_id = %s
         """, (urheilija_id,))
         athlete_data = cursor.fetchone()
         
@@ -38,13 +43,13 @@ def get_athlete_data(urheilija_id):
         
         # Muotoile urheilijan perustiedot
         athlete = {
-            'urheilija_id': athlete_data[0],
-            'etunimi': athlete_data[1],
-            'sukunimi': athlete_data[2],
-            'syntymapaiva': athlete_data[3],
-            'syntymavuosi': athlete_data[4],
-            'sukupuoli': athlete_data[5],
-            'seura_id': athlete_data[6]
+            'urheilija_id': athlete_data['urheilija_id'],
+            'etunimi': athlete_data['etunimi'],
+            'sukunimi': athlete_data['sukunimi'],
+            'syntymapaiva': athlete_data['syntymapaiva'],
+            'syntymavuosi': athlete_data['syntymavuosi'],
+            'sukupuoli': athlete_data['sukupuoli'],
+            'seura_id': athlete_data['seura_id']
         }
         
         logger.debug(f"Urheilijan perustiedot: {athlete}")
@@ -56,7 +61,7 @@ def get_athlete_data(urheilija_id):
             FROM Tulokset t
             JOIN Lajit l ON t.laji_id = l.laji_id
             JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
-            WHERE t.urheilija_id = ?
+            WHERE t.urheilija_id = %s
             ORDER BY k.alkupvm
         """, (urheilija_id,))
         
@@ -67,15 +72,15 @@ def get_athlete_data(urheilija_id):
         competitions = []
         for row in results:
             competitions.append({
-                'tulos_id': row[0],
-                'laji_id': row[1],
-                'lajin_nimi': row[2],
-                'sarja': row[3],
-                'kilpailu_id': row[4],
-                'kilpailun_nimi': row[5],
-                'alkupvm': row[6]
+                'tulos_id': row['tulos_id'],
+                'laji_id': row['laji_id'],
+                'lajin_nimi': row['lajin_nimi'],
+                'sarja': row['sarja'],
+                'kilpailu_id': row['kilpailu_id'],
+                'kilpailun_nimi': row['kilpailun_nimi'],
+                'alkupvm': row['alkupvm']
             })
-            logger.debug(f"Kilpailutulos: Laji={row[2]}, Sarja={row[3]}, Pvm={row[6]}")
+            logger.debug(f"Kilpailutulos: Laji={row['lajin_nimi']}, Sarja={row['sarja']}, Pvm={row['alkupvm']}")
         
         return athlete, competitions
     
@@ -203,13 +208,14 @@ def update_athlete_info(urheilija_id, syntymavuosi=None, sukupuoli=None):
     """Päivittää urheilijan tiedot tietokantaan"""
     logger.debug(f"Päivitetään urheilijan {urheilija_id} tietoja: syntymavuosi={syntymavuosi}, sukupuoli={sukupuoli}")
     
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
         # Hae nykyiset tiedot
-        cursor.execute("SELECT syntymavuosi, sukupuoli FROM Urheilijat WHERE urheilija_id = ?", (urheilija_id,))
-        current_syntymavuosi, current_sukupuoli = cursor.fetchone()
+        cursor.execute("SELECT syntymavuosi, sukupuoli FROM Urheilijat WHERE urheilija_id = %s", (urheilija_id,))
+        row = cursor.fetchone()
+        current_syntymavuosi, current_sukupuoli = row if row else (None, None)
         
         updates = []
         params = []
@@ -217,17 +223,17 @@ def update_athlete_info(urheilija_id, syntymavuosi=None, sukupuoli=None):
         # Päivitä syntymävuosi jos uusi on suurempi (nuorempi ikä)
         if syntymavuosi is not None:
             if current_syntymavuosi is None or syntymavuosi > current_syntymavuosi:
-                updates.append("syntymavuosi = ?")
+                updates.append("syntymavuosi = %s")
                 params.append(syntymavuosi)
         
         # Päivitä sukupuoli vain jos sitä ei ole
         if sukupuoli is not None and current_sukupuoli is None:
-            updates.append("sukupuoli = ?")
+            updates.append("sukupuoli = %s")
             params.append(sukupuoli)
         
         if updates:
             params.append(urheilija_id)
-            query = f"UPDATE Urheilijat SET {', '.join(updates)} WHERE urheilija_id = ?"
+            query = f"UPDATE Urheilijat SET {', '.join(updates)} WHERE urheilija_id = %s"
             cursor.execute(query, params)
             conn.commit()
             logger.info(f"Päivitetty urheilija {urheilija_id}")
@@ -276,7 +282,7 @@ def main():
     logger.info("=========================================")
     
     # Hae kaikki urheilijat
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
