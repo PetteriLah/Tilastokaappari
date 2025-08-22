@@ -253,78 +253,6 @@ def nayta_kilpailun_tulokset(kilpailu_id):
         app.logger.error(f"Kilpailun tulosten hakuvirhe: {str(e)}")
         return render_template('error.html', message='Tietokantavirhe'), 500
 
-@app.route('/urheilija')
-def hae_urheilijan_tulokset():
-    nimi = request.args.get('nimi', '').strip()
-    sukupuoli = request.args.get('sukupuoli', '').upper()
-    ika_min = request.args.get('ika_min', type=int)
-    ika_max = request.args.get('ika_max', type=int)
-    
-    if not nimi:
-        return render_template('error.html', message='Anna urheilijan nimi'), 400
-    
-    try:
-        conn = get_db_connection()
-        c = conn.cursor()
-        
-        sql = """
-            SELECT l.lajin_nimi, l.sarja, k.kilpailun_nimi, k.alkupvm, 
-                   COALESCE(t.tulos, t.lisatiedot) as tulos,
-                   t.sijoitus, u.syntymavuosi, u.sukupuoli
-            FROM Tulokset t
-            JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
-            JOIN Lajit l ON t.laji_id = l.laji_id
-            JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
-            WHERE (u.etunimi ILIKE %s OR u.sukunimi ILIKE %s OR (u.etunimi || ' ' || u.sukunimi) ILIKE %s)
-        """
-        params = [f'%{nimi}%', f'%{nimi}%', f'%{nimi}%']
-        
-        if sukupuoli in ['M', 'N']:
-            sql += " AND u.sukupuoli = %s"
-            params.append(sukupuoli)
-        
-        if ika_min is not None or ika_max is not None:
-            sql += " AND k.alkupvm IS NOT NULL AND u.syntymavuosi IS NOT NULL"
-            
-            if ika_min is not None and ika_max is not None:
-                sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi BETWEEN %s AND %s)"
-                params.extend([ika_min, ika_max])
-            elif ika_min is not None:
-                sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi >= %s)"
-                params.append(ika_min)
-            elif ika_max is not None:
-                sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi <= %s)"
-                params.append(ika_max)
-        
-        sql += " ORDER BY k.alkupvm DESC, l.lajin_nimi"
-        
-        c.execute(sql, params)
-        results = c.fetchall()
-        
-        tulokset = []
-        for result in results:
-            tulokset.append({
-                'lajin_nimi': result[0],
-                'sarja': result[1],
-                'kilpailun_nimi': result[2],
-                'alkupvm': result[3],
-                'tulos': result[4],
-                'sijoitus': result[5],
-                'syntymavuosi': result[6],
-                'sukupuoli': result[7]
-            })
-        
-        conn.close()
-        
-        return render_template('urheilijan_tulokset.html', 
-                             nimi=nimi,
-                             tulokset=tulokset,
-                             sukupuoli=sukupuoli,
-                             ika_min=ika_min,
-                             ika_max=ika_max)
-    except Exception as e:
-        app.logger.error(f"Urheilijan tulosten hakuvirhe: {str(e)}")
-        return render_template('error.html', message='Tietokantavirhe'), 500
 
 @app.route('/laji')
 def hae_lajin_parhaat_tulokset():
@@ -356,7 +284,7 @@ def hae_lajin_parhaat_tulokset():
                     u.etunimi, 
                     u.sukunimi, 
                     COALESCE(s.seura_nimi, '-') as seura,
-                    COALESCE(t.tulos, t.lisatiedot) as tulos,
+                    COALESCE(CAST(t.tulos AS TEXT), t.lisatiedot) as tulos,
                     k.kilpailun_nimi, 
                     k.alkupvm,
                     u.syntymavuosi, 
@@ -471,76 +399,6 @@ def hae_lajin_parhaat_tulokset():
                              vuodet=vuodet)
     except Exception as e:
         app.logger.error(f"Lajin parhaiden tulosten hakuvirhe: {str(e)}")
-        return render_template('error.html', message='Tietokantavirhe'), 500
-
-@app.route('/urheilijat')
-def listaa_urheilijat():
-    sukupuoli = request.args.get('sukupuoli', '').upper()
-    ika_min = request.args.get('ika_min', type=int)
-    ika_max = request.args.get('ika_max', type=int)
-    
-    current_year = datetime.now().year
-    
-    try:
-        conn = get_db_connection()
-        c = conn.cursor()
-        
-        sql = """
-            SELECT 
-                urheilija_id,
-                TRIM(etunimi) as etunimi,
-                TRIM(sukunimi) as sukunimi,
-                sukupuoli,
-                syntymavuosi
-            FROM Urheilijat
-            WHERE 1=1
-        """
-        
-        params = []
-        
-        if sukupuoli in ['M', 'N']:
-            sql += " AND sukupuoli = %s"
-            params.append(sukupuoli)
-        
-        sql += " AND sukupuoli IS NOT NULL AND syntymavuosi IS NOT NULL"
-        
-        c.execute(sql, params)
-        kaikki_urheilijat = c.fetchall()
-        
-        unique_urheilijat = {}
-        for urheilija in kaikki_urheilijat:
-            avain = f"{urheilija[1].lower()}-{urheilija[2].lower()}-{urheilija[4]}"
-            if avain not in unique_urheilijat:
-                unique_urheilijat[avain] = {
-                    'urheilija_id': urheilija[0],
-                    'etunimi': urheilija[1],
-                    'sukunimi': urheilija[2],
-                    'sukupuoli': urheilija[3],
-                    'syntymavuosi': urheilija[4]
-                }
-        
-        urheilijat = sorted(unique_urheilijat.values(), 
-                           key=lambda x: (x['sukunimi'], x['etunimi']))
-        
-        if ika_min is not None or ika_max is not None:
-            filtered_urheilijat = []
-            for urheilija in urheilijat:
-                if urheilija['syntymavuosi']:
-                    ika = current_year - urheilija['syntymavuosi']
-                    if ((ika_min is None or ika >= ika_min) and 
-                        (ika_max is None or ika <= ika_max)):
-                        filtered_urheilijat.append(urheilija)
-            urheilijat = filtered_urheilijat
-        
-        conn.close()
-        
-        return render_template('urheilijat.html', 
-                            urheilijat=urheilijat,
-                            sukupuoli=sukupuoli,
-                            ika_min=ika_min,
-                            ika_max=ika_max)
-    except Exception as e:
-        app.logger.error(f"Urheilijoiden hakuvirhe: {str(e)}")
         return render_template('error.html', message='Tietokantavirhe'), 500
 
 @app.route('/lajit')
