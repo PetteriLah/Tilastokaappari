@@ -337,10 +337,15 @@ def hae_lajin_parhaat_tulokset():
     if not laji:
         return render_template('error.html', message='Anna lajin nimi'), 400
 
-    jarjestys = "DESC"
+    # Määritellään oikea järjestyssuunta eri lajeille
+    jarjestys = "DESC"  # Oletus: pituuslajit (suurin paras)
+    
+    # Aikalajit (pienin aika on paras)
     aikalajit = ['kävely', 'aidat', 'esteet', 'viesti', 'aitaviesti', 'maantiejuoksu',
-                'maraton', 'puolimaraton', '10000m', '5000m', '3000m', '1500m', '800m', '400m']
+                'maraton', 'puolimaraton', '10000m', '5000m', '3000m', '1500m', '800m', '400m',
+                '200m', '100m', '60m']
 
+    # Tarkistetaan onko kyseessä aikalaji
     if (laji.lower().endswith('m') or 
         any(aikalaji in laji.lower() for aikalaji in aikalajit)):
         jarjestys = "ASC"
@@ -349,7 +354,15 @@ def hae_lajin_parhaat_tulokset():
         conn = get_db_connection()
         c = conn.cursor()
 
-        sql = """
+        # Määritellään tulosvertailufunktio järjestyksen mukaan
+        if jarjestys == "ASC":
+            order_direction = "ASC"
+            default_value = "999999"
+        else:
+            order_direction = "DESC"
+            default_value = "-999999"
+
+        sql = f"""
             WITH ParhaatTulokset AS (
                 SELECT 
                     u.urheilija_id,
@@ -368,8 +381,7 @@ def hae_lajin_parhaat_tulokset():
                             CAST(SPLIT_PART(CAST(t.tulos AS TEXT), ':', 2) AS NUMERIC)
                         WHEN CAST(t.tulos AS TEXT) ~ '^[0-9]+([.][0-9]+)?$' THEN
                             CAST(t.tulos AS NUMERIC)
-                        ELSE
-                            CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
+                        ELSE {default_value}
                     END AS tulos_numero,
                     ROW_NUMBER() OVER (
                         PARTITION BY u.urheilija_id 
@@ -380,9 +392,8 @@ def hae_lajin_parhaat_tulokset():
                                     CAST(SPLIT_PART(CAST(t.tulos AS TEXT), ':', 2) AS NUMERIC)
                                 WHEN CAST(t.tulos AS TEXT) ~ '^[0-9]+([.][0-9]+)?$' THEN
                                     CAST(t.tulos AS NUMERIC)
-                                ELSE
-                                    CASE WHEN %s = 'ASC' THEN 999999 ELSE -999999 END
-                            END
+                                ELSE {default_value}
+                            END {order_direction}
                     ) AS rn
                 FROM Urheilijat u
                 JOIN Tulokset t ON u.urheilija_id = t.urheilija_id
@@ -394,7 +405,7 @@ def hae_lajin_parhaat_tulokset():
                 AND CAST(t.tulos AS TEXT) != 'DNF'
         """
 
-        params = [jarjestys, jarjestys, f'%{laji}%']
+        params = [f'%{laji}%']
 
         if sukupuoli in ['M', 'N']:
             sql += " AND u.sukupuoli = %s"
@@ -417,7 +428,7 @@ def hae_lajin_parhaat_tulokset():
                 sql += " AND (EXTRACT(YEAR FROM k.alkupvm) - u.syntymavuosi <= %s)"
                 params.append(ika_max)
 
-        sql += """
+        sql += f"""
             )
             SELECT 
                 etunimi, 
@@ -431,7 +442,7 @@ def hae_lajin_parhaat_tulokset():
                 sijoitus
             FROM ParhaatTulokset
             WHERE rn = 1
-            ORDER BY tulos_numero """ + jarjestys + """
+            ORDER BY tulos_numero {jarjestys}
             LIMIT 50
         """
 
