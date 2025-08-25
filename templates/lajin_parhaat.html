@@ -69,14 +69,14 @@
                         <td>{{ tulos['alkupvm'] }}</td>
                         <td>{{ tulos['sijoitus'] }}</td>
                         <td>
-                           {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
-                          {% set kilpailuvuosi = tulos['alkupvm'][:4]|int %}
-                         {% set ika = kilpailuvuosi - tulos['syntymavuosi'] %}
-                      {{ ika }}v
-                     {% else %}
-                             -
-                     {% endif %}
-                       </td>
+                            {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
+                            {% set kilpailuvuosi = tulos['alkupvm'][:4]|int %}
+                            {% set ika = kilpailuvuosi - tulos['syntymavuosi'] %}
+                            {{ ika }}v
+                            {% else %}
+                                 -
+                            {% endif %}
+                        </td>
                         <td>
                             {% if tulos['sukupuoli'] %}
                                 {% if tulos['sukupuoli'].upper() == 'M' %}Mies{% else %}Nainen{% endif %}
