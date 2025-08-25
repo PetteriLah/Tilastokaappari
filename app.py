@@ -338,60 +338,60 @@ def hae_lajin_parhaat_tulokset():
         return render_template('error.html', message='Anna lajin nimi'), 400
     
     # Määritä järjestyssuunta
-    jarjestys = "DESC"  # Oletus: suurempi on parempi
+    jarjestys_suunta = "DESC"  # Oletus: suurempi on parempi
     aikalajit = ['kävely', 'aidat', 'esteet', 'viesti', 'aitaviesti', 'maantiejuoksu',
                 'maraton', 'puolimaraton', '10000m', '5000m', '3000m', '1500m', '800m', '400m']
     
     if (laji.lower().endswith('m') or 
         any(aikalaji in laji.lower() for aikalaji in aikalajit)):
-        jarjestys = "ASC"  # Pienempi tulos on parempi
+        jarjestys_suunta = "ASC"  # Pienempi tulos on parempi
     
     conn = get_db_connection()
     c = conn.cursor()
     
-    # Muodosta SQL-kysely - KORJATTU VERSIO
+    # Yksinkertaistettu kysely
     sql = """
-        WITH NumeroituTulos AS (
-            SELECT 
-                u.urheilija_id,
-                u.etunimi, 
-                u.sukunimi, 
-                COALESCE(s.seura_nimi, '-') as seura,
-                COALESCE(t.tulos, t.lisatiedot) as tulos,
-                k.kilpailun_nimi, 
-                k.alkupvm,
-                u.syntymavuosi, 
-                u.sukupuoli,
-                t.sijoitus,
-                CASE 
-                    WHEN t.tulos GLOB '*[0-9]*:[0-9]*' THEN
-                        CAST(substr(t.tulos, 1, instr(t.tulos, ':')-1) AS INTEGER) * 60 + 
-                        CAST(substr(t.tulos, instr(t.tulos, ':')+1) AS REAL)
-                    WHEN t.tulos GLOB '*[0-9]*.*[0-9]*' THEN
-                        CAST(t.tulos AS REAL)
-                    ELSE NULL
-                END AS tulos_numero
-            FROM Urheilijat u
-            JOIN Tulokset t ON u.urheilija_id = t.urheilija_id
-            LEFT JOIN Seurat s ON u.seura_id = s.seura_id
-            JOIN Lajit l ON t.laji_id = l.laji_id
-            JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
-            WHERE l.lajin_nimi LIKE ? AND t.tulos != 'DNS' AND t.tulos != 'DNF'
+        SELECT 
+            u.etunimi, 
+            u.sukunimi, 
+            COALESCE(s.seura_nimi, '-') as seura,
+            COALESCE(t.tulos, t.lisatiedot) as tulos,
+            k.kilpailun_nimi, 
+            k.alkupvm,
+            u.syntymavuosi, 
+            u.sukupuoli,
+            t.sijoitus,
+            CASE 
+                WHEN t.tulos GLOB '*[0-9]*:[0-9]*' THEN
+                    CAST(substr(t.tulos, 1, instr(t.tulos, ':')-1) AS INTEGER) * 60 + 
+                    CAST(substr(t.tulos, instr(t.tulos, ':')+1) AS REAL)
+                WHEN t.tulos GLOB '*[0-9]*.*[0-9]*' THEN
+                    CAST(t.tulos AS REAL)
+                ELSE NULL
+            END AS tulos_numero
+        FROM Urheilijat u
+        JOIN Tulokset t ON u.urheilija_id = t.urheilija_id
+        LEFT JOIN Seurat s ON u.seura_id = s.seura_id
+        JOIN Lajit l ON t.laji_id = l.laji_id
+        JOIN Kilpailut k ON l.kilpailu_id = k.kilpailu_id
+        WHERE l.lajin_nimi LIKE ? 
+          AND t.tulos != 'DNS' 
+          AND t.tulos != 'DNF'
+          AND t.tulos IS NOT NULL
+          AND t.tulos != ''
     """
     
     params = [f'%{laji}%']
     
-    # Lisää sukupuoli-suodatin
+    # Lisää suodattimet
     if sukupuoli in ['M', 'N']:
         sql += " AND u.sukupuoli = ?"
         params.append(sukupuoli)
     
-    # Lisää vuosi-suodatin
     if vuosi is not None:
         sql += " AND strftime('%Y', k.alkupvm) = ?"
         params.append(str(vuosi))
     
-    # Lisää ikäsuodattimet
     if ika_min is not None or ika_max is not None:
         sql += " AND k.alkupvm IS NOT NULL AND u.syntymavuosi IS NOT NULL"
         
@@ -405,56 +405,32 @@ def hae_lajin_parhaat_tulokset():
             sql += " AND (CAST(SUBSTR(k.alkupvm, 1, 4) AS INTEGER) - u.syntymavuosi <= ?)"
             params.append(ika_max)
     
-    sql += """
-        ),
-        ParhaatTulokset AS (
-            SELECT 
-                *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY urheilija_id 
-                    ORDER BY 
-                        CASE WHEN ? = 'ASC' THEN 
-                            CASE WHEN tulos_numero IS NULL THEN 1 ELSE 0 END, 
-                            tulos_numero
-                        ELSE 
-                            CASE WHEN tulos_numero IS NULL THEN 0 ELSE 1 END,
-                            tulos_numero DESC
-                        END
-                ) AS rn_urheilija,
-                ROW_NUMBER() OVER (
-                    ORDER BY 
-                        CASE WHEN ? = 'ASC' THEN 
-                            CASE WHEN tulos_numero IS NULL THEN 1 ELSE 0 END, 
-                            tulos_numero
-                        ELSE 
-                            CASE WHEN tulos_numero IS NULL THEN 0 ELSE 1 END,
-                            tulos_numero DESC
-                        END
-                ) AS rn_kokonais
-            FROM NumeroituTulos
-        )
-        SELECT 
-            etunimi, 
-            sukunimi, 
-            seura,
-            tulos,
-            kilpailun_nimi, 
-            alkupvm,
-            syntymavuosi, 
-            sukupuoli,
-            sijoitus
-        FROM ParhaatTulokset
-        WHERE rn_urheilija = 1
-        ORDER BY rn_kokonais
-        LIMIT 50
-    """
+    # Järjestä tulokset
+    if jarjestys_suunta == "ASC":
+        sql += " ORDER BY CASE WHEN tulos_numero IS NULL THEN 1 ELSE 0 END, tulos_numero ASC"
+    else:
+        sql += " ORDER BY CASE WHEN tulos_numero IS NULL THEN 0 ELSE 1 END, tulos_numero DESC"
     
-    # Lisää järjestysparametrit
-    params.extend([jarjestys, jarjestys])
+    sql += " LIMIT 100"
     
     try:
         c.execute(sql, params)
         tulokset = c.fetchall()
+        
+        # Suodata tulokset näyttämään vain urheilijan paras tulos
+        parhaat_tulokset = []
+        nakyneet_urheilijat = set()
+        
+        for tulos in tulokset:
+            urheilija_avain = f"{tulos['etunimi']}_{tulos['sukunimi']}_{tulos['syntymavuosi']}"
+            
+            if urheilija_avain not in nakyneet_urheilijat:
+                parhaat_tulokset.append(tulos)
+                nakyneet_urheilijat.add(urheilija_avain)
+                
+            if len(parhaat_tulokset) >= 50:
+                break
+                
     except sqlite3.OperationalError as e:
         conn.close()
         app.logger.error(f"SQL virhe: {str(e)}")
@@ -475,7 +451,7 @@ def hae_lajin_parhaat_tulokset():
     
     return render_template('lajin_parhaat.html', 
                          laji=laji,
-                         tulokset=tulokset,
+                         tulokset=parhaat_tulokset,
                          sukupuoli=sukupuoli,
                          ika_min=ika_min,
                          ika_max=ika_max,
