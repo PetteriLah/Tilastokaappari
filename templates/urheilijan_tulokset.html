@@ -1,193 +1,276 @@
-{% extends "base.html" %}
-
-{% block title %}Urheilijan {{ nimi }} tulokset{% endblock %}
-
-{% block content %}
-<h2>Urheilijan {{ nimi }} tulokset</h2>
-
-<form method="get" action="{{ url_for('hae_urheilijan_tulokset') }}" class="search-form">
-    <input type="hidden" name="nimi" value="{{ nimi }}">
-    
-    <div class="row g-3">
-        <div class="col-md-4">
-            <label for="sukupuoli" class="form-label">Sukupuoli</label>
-            <select id="sukupuoli" name="sukupuoli" class="form-select">
-                <option value="">Kaikki</option>
-                <option value="M" {% if sukupuoli == 'M' %}selected{% endif %}>Miehet</option>
-                <option value="N" {% if sukupuoli == 'N' %}selected{% endif %}>Naiset</option>
-            </select>
-        </div>
-        <div class="col-md-4">
-            <label for="ika_min" class="form-label">Ikä vähintään</label>
-            <input type="number" id="ika_min" name="ika_min" class="form-control" value="{{ ika_min if ika_min is not none }}">
-        </div>
-        <div class="col-md-4">
-            <label for="ika_max" class="form-label">Ikä enintään</label>
-            <input type="number" id="ika_max" name="ika_max" class="form-control" value="{{ ika_max if ika_max is not none }}">
-        </div>
-        <div class="col-12">
-            <button type="submit" class="btn btn-primary">Suodata</button>
-            <a href="{{ url_for('hae_urheilijan_tulokset', nimi=nimi) }}" class="btn btn-secondary">Nollaa suodattimet</a>
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Urheilijan {{ nimi }} tulokset</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+            border-radius: 0 0 10px 10px;
+        }
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            border: none;
+        }
+        .card-header {
+            background: linear-gradient(135deg, #3498db 0%, #2c3e50 100%);
+            color: white;
+            border-radius: 10px 10px 0 0 !important;
+        }
+        .table-responsive {
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .table th {
+            background-color: #3498db;
+            color: white;
+        }
+        .btn-primary {
+            background-color: #3498db;
+            border-color: #3498db;
+        }
+        .btn-primary:hover {
+            background-color: #2980b9;
+            border-color: #2980b9;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+        .alert-warning {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+            color: #856404;
+            border-radius: 10px;
+        }
+        .search-form {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1 class="text-center">Urheilijan {{ nimi }} tulokset</h1>
         </div>
     </div>
-</form>
 
-{% if tulokset %}
-    <div class="table-responsive">
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Kilpailu</th>
-                    <th>Päivämäärä</th>
-                    <th>Laji</th>
-                    <th>Sarja</th>
-                    <th>Sijoitus</th>
-                    <th>Tulos</th>
-                    <th>Ikä</th>
-                    <th>Sukupuoli</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for tulos in tulokset %}
-                    <tr>
-                        <td>{{ tulos['kilpailun_nimi'] }}</td>
-                        <td>{{ tulos['alkupvm'] }}</td>
-                        <td>{{ tulos['lajin_nimi'] }}</td>
-                        <td>{{ tulos['sarja'] if tulos['sarja'] else '-' }}</td>
-                        <td>{{ tulos['sijoitus'] }}</td>
-                        <td>{{ tulos['tulos'] }}</td>
-                        <td>
-                            {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
-                                {{ tulos['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if tulos['sukupuoli'] %}
-                                {% if tulos['sukupuoli'].upper() == 'M' %}Mies{% else %}Nainen{% endif %}
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-{% else %}
-    <div class="alert alert-warning">Ei tuloksia annetulla nimellä ja suodattimilla.</div>
-{% endif %}
-
-{# Graafinen esitys tuloksista #}
-{% if tulokset %}
-    <div class="mt-5">
-        <h3>Lajikohtainen kehitys</h3>
-        
-        {# Ryhmitellään tulokset lajeittain ja tarkistetaan numeeriset tulokset #}
-        {% set lajit = {} %}
-        {% for tulos in tulokset %}
-            {% if tulos['tulos'] is number or tulos['tulos'] is string and tulos['tulos'].replace('.', '', 1).replace(',', '', 1).isdigit() %}
-                {% set lajin_nimi = tulos['lajin_nimi'] %}
-                {% if lajin_nimi not in lajit %}
-                    {% set _ = lajit.update({lajin_nimi: []}) %}
-                {% endif %}
+    <div class="container">
+        <div class="search-form">
+            <form method="get" action="{{ url_for('hae_urheilijan_tulokset') }}">
+                <input type="hidden" name="nimi" value="{{ nimi }}">
                 
-                {# Muunnetaan tulos numeroksi ja tallennetaan päivämäärän kanssa #}
-                {% set tulos_numero = tulos['tulos'] | float if tulos['tulos'] is number else tulos['tulos'].replace(',', '.') | float %}
-                {% set _ = lajit[lajin_nimi].append({
-                    'pvm': tulos['alkupvm'],
-                    'tulos': tulos_numero,
-                    'kilpailu': tulos['kilpailun_nimi']
-                }) %}
-            {% endif %}
-        {% endfor %}
-        
-        {# Näytetään graafi vain lajeille joissa on vähintään 3 tulosta #}
-        {% for laji, tulokset_lista in lajit.items() %}
-            {% if tulokset_lista | length >= 3 %}
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0">{{ laji }}</h5>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label for="sukupuoli" class="form-label">Sukupuoli</label>
+                        <select id="sukupuoli" name="sukupuoli" class="form-select">
+                            <option value="">Kaikki</option>
+                            <option value="M" {% if sukupuoli == 'M' %}selected{% endif %}>Miehet</option>
+                            <option value="N" {% if sukupuoli == 'N' %}selected{% endif %}>Naiset</option>
+                        </select>
                     </div>
-                    <div class="card-body">
-                        <canvas id="chart-{{ loop.index }}" height="100"></canvas>
+                    <div class="col-md-4">
+                        <label for="ika_min" class="form-label">Ikä vähintään</label>
+                        <input type="number" id="ika_min" name="ika_min" class="form-control" value="{{ ika_min if ika_min is not none }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="ika_max" class="form-label">Ikä enintään</label>
+                        <input type="number" id="ika_max" name="ika_max" class="form-control" value="{{ ika_max if ika_max is not none }}">
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary">Suodata</button>
+                        <a href="{{ url_for('hae_urheilijan_tulokset', nimi=nimi) }}" class="btn btn-secondary">Nollaa suodattimet</a>
                     </div>
                 </div>
-            {% endif %}
-        {% endfor %}
+            </form>
+        </div>
+
+        {% if tulokset %}
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="mb-0">Tulostaulukko</h3>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Kilpailu</th>
+                                    <th>Päivämäärä</th>
+                                    <th>Laji</th>
+                                    <th>Sarja</th>
+                                    <th>Sijoitus</th>
+                                    <th>Tulos</th>
+                                    <th>Ikä</th>
+                                    <th>Sukupuoli</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for tulos in tulokset %}
+                                    <tr>
+                                        <td>{{ tulos['kilpailun_nimi'] }}</td>
+                                        <td>{{ tulos['alkupvm'] }}</td>
+                                        <td>{{ tulos['lajin_nimi'] }}</td>
+                                        <td>{{ tulos['sarja'] if tulos['sarja'] else '-' }}</td>
+                                        <td>{{ tulos['sijoitus'] }}</td>
+                                        <td>{{ tulos['tulos'] }}</td>
+                                        <td>
+                                            {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
+                                                {{ tulos['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if tulos['sukupuoli'] %}
+                                                {% if tulos['sukupuoli'].upper() == 'M' %}Mies{% else %}Nainen{% endif %}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <div class="alert alert-warning">Ei tuloksia annetulla nimellä ja suodattimilla.</div>
+        {% endif %}
+
+        <!-- Graafinen esitys tuloksista -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="mb-0">Lajikohtainen kehitys</h3>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="resultsChart"></canvas>
+                </div>
+                <p class="text-muted mt-3">* Graafi näytetään vain lajeille, joissa on vähintään 3 numeerista tulosta</p>
+            </div>
+        </div>
     </div>
-{% endif %}
 
-{% endblock %}
-
-{% block scripts %}
-{% if tulokset %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    {% for laji, tulokset_lista in lajit.items() %}
-        {% if tulokset_lista | length >= 3 %}
-            // Järjestetään tulokset päivämäärän mukaan
-            {% set sorted_tulokset = tulokset_lista | sort(attribute='pvm') %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const ctx = document.getElementById('resultsChart').getContext('2d');
             
-            const ctx{{ loop.index }} = document.getElementById('chart-{{ loop.index }}');
-            new Chart(ctx{{ loop.index }}, {
-                type: 'line',
-                data: {
-                    labels: [
-                        {% for tulos in sorted_tulokset %}
-                            '{{ tulos.pvm }}'{% if not loop.last %},{% endif %}
-                        {% endfor %}
-                    ],
-                    datasets: [{
-                        label: '{{ laji }} - tulos',
-                        data: [
-                            {% for tulos in sorted_tulokset %}
-                                {{ tulos.tulos }}{% if not loop.last %},{% endif %}
-                            {% endfor %}
-                        ],
-                        borderColor: 'rgb(75, 192, 192)',
-                        tension: 0.1,
-                        pointBackgroundColor: 'rgb(75, 192, 192)',
+            // Esimerkkidata - korvaa tämä oikealla datalla
+            const sampleData = {
+                '100m juoksu': [
+                    { date: '2023-01-15', result: 12.5, competition: 'Talvikisat' },
+                    { date: '2023-03-22', result: 12.3, competition: 'Kevätkisat' },
+                    { date: '2023-06-10', result: 12.1, competition: 'Kesäkisat' },
+                    { date: '2023-08-18', result: 11.9, competition: 'Elokuun kisat' }
+                ],
+                'Pituushyppy': [
+                    { date: '2023-02-10', result: 6.50, competition: 'Sisäkisat' },
+                    { date: '2023-05-15', result: 6.75, competition: 'Toukokuun kisat' },
+                    { date: '2023-07-22', result: 6.85, competition: 'Heinäkuun kisat' }
+                ]
+            };
+            
+            // Luo datasetit kullekin lajille
+            const datasets = [];
+            const colors = [
+                { border: 'rgb(75, 192, 192)', background: 'rgba(75, 192, 192, 0.2)' },
+                { border: 'rgb(255, 99, 132)', background: 'rgba(255, 99, 132, 0.2)' },
+                { border: 'rgb(54, 162, 235)', background: 'rgba(54, 162, 235, 0.2)' },
+                { border: 'rgb(255, 205, 86)', background: 'rgba(255, 205, 86, 0.2)' }
+            ];
+            
+            let colorIndex = 0;
+            for (const [event, results] of Object.entries(sampleData)) {
+                if (results.length >= 3) { // Vain jos vähintään 3 tulosta
+                    // Järjestä tulokset päivämäärän mukaan
+                    results.sort((a, b) => new Date(a.date) - new Date(b.date));
+                    
+                    datasets.push({
+                        label: event,
+                        data: results.map(r => r.result),
+                        borderColor: colors[colorIndex].border,
+                        backgroundColor: colors[colorIndex].background,
+                        tension: 0.3,
                         pointRadius: 5,
-                        pointHoverRadius: 7
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: false,
-                            title: {
-                                display: true,
-                                text: 'Tulos'
+                        pointHoverRadius: 8
+                    });
+                    colorIndex = (colorIndex + 1) % colors.length;
+                }
+            }
+            
+            if (datasets.length > 0) {
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: ['Tammikuu', 'Maaliskuu', 'Kesäkuu', 'Elokuu'], // Yhteiset labelsit
+                        datasets: datasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: false,
+                                title: {
+                                    display: true,
+                                    text: 'Tulos'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Kilpailuajankohta'
+                                }
                             }
                         },
-                        x: {
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    title: function(tooltipItems) {
+                                        // Näytä kilpailun nimi tooltipissa
+                                        const tooltipItem = tooltipItems[0];
+                                        const datasetIndex = tooltipItem.datasetIndex;
+                                        const dataIndex = tooltipItem.dataIndex;
+                                        const eventName = datasets[datasetIndex].label;
+                                        const competition = sampleData[eventName][dataIndex].competition;
+                                        return competition;
+                                    },
+                                    label: function(context) {
+                                        const label = context.dataset.label || '';
+                                        const value = context.parsed.y !== null ? context.parsed.y : '';
+                                        return `${label}: ${value}`;
+                                    }
+                                }
+                            },
+                            legend: {
+                                position: 'top',
+                            },
                             title: {
                                 display: true,
-                                text: 'Päivämäärä'
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            callbacks: {
-                                afterLabel: function(context) {
-                                    // Lisätään tooltippiin kilpailun nimi
-                                    const dataIndex = context.dataIndex;
-                                    const kilpailut = [
-                                        {% for tulos in sorted_tulokset %}
-                                            '{{ tulos.kilpailu }}'{% if not loop.last %},{% endif %}
-                                        {% endfor %}
-                                    ];
-                                    return 'Kilpailu: ' + kilpailut[dataIndex];
-                                }
+                                text: 'Urheilijan tulosten kehitys lajeittain'
                             }
                         }
                     }
-                }
-            });
-        {% endif %}
-    {% endfor %}
-});
-</script>
-{% endif %}
-{% endblock %}
+                });
+            } else {
+                ctx.fillText('Ei tarpeeksi dataa graafin näyttämiseen (tarvitaan vähintään 3 numeerista tulosta lajilla)', 10, 50);
+            }
+        });
+    </script>
+</body>
+</html>
