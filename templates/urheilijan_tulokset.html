@@ -58,7 +58,7 @@
                         <td>{{ tulos['tulos'] }}</td>
                         <td>
                             {% if tulos['syntymavuosi'] and tulos['alkupvm'] %}
-                                {{ tulos['alkupvm'].year - tulos['syntymavuosi'] }}v
+                                {{ tulos['alkupvm'][:4]|int - tulos['syntymavuosi'] }}v
                             {% endif %}
                         </td>
                         <td>
@@ -73,5 +73,121 @@
     </div>
 {% else %}
     <div class="alert alert-warning">Ei tuloksia annetulla nimellä ja suodattimilla.</div>
+{% endif %}
+
+{# Graafinen esitys tuloksista #}
+{% if tulokset %}
+    <div class="mt-5">
+        <h3>Lajikohtainen kehitys</h3>
+        
+        {# Ryhmitellään tulokset lajeittain ja tarkistetaan numeeriset tulokset #}
+        {% set lajit = {} %}
+        {% for tulos in tulokset %}
+            {% if tulos['tulos'] is number or tulos['tulos'] is string and tulos['tulos'].replace('.', '', 1).replace(',', '', 1).isdigit() %}
+                {% set lajin_nimi = tulos['lajin_nimi'] %}
+                {% if lajin_nimi not in lajit %}
+                    {% set _ = lajit.update({lajin_nimi: []}) %}
+                {% endif %}
+                
+                {# Muunnetaan tulos numeroksi ja tallennetaan päivämäärän kanssa #}
+                {% set tulos_numero = tulos['tulos'] | float if tulos['tulos'] is number else tulos['tulos'].replace(',', '.') | float %}
+                {% set _ = lajit[lajin_nimi].append({
+                    'pvm': tulos['alkupvm'],
+                    'tulos': tulos_numero,
+                    'kilpailu': tulos['kilpailun_nimi']
+                }) %}
+            {% endif %}
+        {% endfor %}
+        
+        {# Näytetään graafi vain lajeille joissa on vähintään 3 tulosta #}
+        {% for laji, tulokset_lista in lajit.items() %}
+            {% if tulokset_lista | length >= 3 %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">{{ laji }}</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="chart-{{ loop.index }}" height="100"></canvas>
+                    </div>
+                </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+{% if tulokset %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    {% for laji, tulokset_lista in lajit.items() %}
+        {% if tulokset_lista | length >= 3 %}
+            // Järjestetään tulokset päivämäärän mukaan
+            {% set sorted_tulokset = tulokset_lista | sort(attribute='pvm') %}
+            
+            const ctx{{ loop.index }} = document.getElementById('chart-{{ loop.index }}');
+            new Chart(ctx{{ loop.index }}, {
+                type: 'line',
+                data: {
+                    labels: [
+                        {% for tulos in sorted_tulokset %}
+                            '{{ tulos.pvm }}'{% if not loop.last %},{% endif %}
+                        {% endfor %}
+                    ],
+                    datasets: [{
+                        label: '{{ laji }} - tulos',
+                        data: [
+                            {% for tulos in sorted_tulokset %}
+                                {{ tulos.tulos }}{% if not loop.last %},{% endif %}
+                            {% endfor %}
+                        ],
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1,
+                        pointBackgroundColor: 'rgb(75, 192, 192)',
+                        pointRadius: 5,
+                        pointHoverRadius: 7
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'Tulos'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Päivämäärä'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                afterLabel: function(context) {
+                                    // Lisätään tooltippiin kilpailun nimi
+                                    const dataIndex = context.dataIndex;
+                                    const kilpailut = [
+                                        {% for tulos in sorted_tulokset %}
+                                            '{{ tulos.kilpailu }}'{% if not loop.last %},{% endif %}
+                                        {% endfor %}
+                                    ];
+                                    return 'Kilpailu: ' + kilpailut[dataIndex];
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        {% endif %}
+    {% endfor %}
+});
+</script>
 {% endif %}
 {% endblock %}
