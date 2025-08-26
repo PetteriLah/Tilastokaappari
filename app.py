@@ -156,7 +156,14 @@ def nayta_kilpailut():
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT kilpailu_id, kilpailun_nimi, alkupvm FROM Kilpailut ORDER BY alkupvm DESC")
+            # Muutettu kysely: hae vain kilpailut joissa on tuloksia
+            c.execute("""
+                SELECT DISTINCT k.kilpailu_id, k.kilpailun_nimi, k.alkupvm 
+                FROM Kilpailut k
+                JOIN Lajit l ON k.kilpailu_id = l.kilpailu_id
+                JOIN Tulokset t ON l.laji_id = t.laji_id
+                ORDER BY k.alkupvm DESC
+            """)
             kilpailut = c.fetchall()
 
             # Muunnetaan tuplet sanakirjoiksi
