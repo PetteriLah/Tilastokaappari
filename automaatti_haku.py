@@ -20,23 +20,51 @@ def log_message(message, level="INFO"):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] [{level}] {message}")
 
-def is_already_processed(event_id):
-    """Tarkistaa onko kilpailu jo olemassa tietokannassa"""
+def get_existing_event_ids():
+    """Hakee kaikki tietokannassa jo olevien kilpailujen ID:t"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Tarkista onko kilpailu jo tietokannassa
-        cursor.execute("SELECT kilpailu_id FROM Kilpailut WHERE kilpailu_id = %s", (event_id,))
+        # Haetaan kaikki kilpailu_id:t Kilpailut-taulusta
+        cursor.execute("SELECT kilpailu_id FROM Kilpailut")
+        existing_ids = {row[0] for row in cursor.fetchall()}
         
-        result = cursor.fetchone()
-        return result is not None
+        log_message(f"Tietokannassa on {len(existing_ids)} kilpailua")
+        return existing_ids
     except psycopg2.Error as e:
-        log_message(f"Tietokantavirhe tapahtuman {event_id} tarkistuksessa: {str(e)}", "ERROR")
-        return False
+        log_message(f"Virhe olemassa olevien kilpailujen haussa: {str(e)}", "ERROR")
+        return set()
     finally:
         if 'conn' in locals():
             conn.close()
+
+def filter_new_events(events, existing_ids):
+    """Suodattaa uudet tapahtumat (ne joita ei ole tietokannassa)"""
+    new_events = []
+    for event in events:
+        event_id = event["Id"]
+        if event_id not in existing_ids:
+            new_events.append(event)
+        else:
+            log_message(f"Tapahtuma {event_id} ({event.get('Name', 'N/A')}) ohitettu - on jo tietokannassa", "DEBUG")
+    
+    return new_events
+
+def is_valid_date(event_date):
+    """Tarkistaa että tapahtuma on menneisyydessä (max eilinen)"""
+    try:
+        event_date = datetime.fromisoformat(event_date.replace("Z", "+00:00"))
+        yesterday = datetime.now() - timedelta(days=1)
+        valid = event_date.date() <= yesterday.date()
+        
+        if not valid:
+            log_message(f"Tapahtuma {event_date} on tulevaisuudessa, ohitetaan", "DEBUG")
+        
+        return valid
+    except ValueError as e:
+        log_message(f"Virheellinen päivämäärä {event_date}: {str(e)}", "ERROR")
+        return False
 
 def update_last_updated(event_id):
     """Päivittää kilpailun viimeisimmän päivitysajan"""
@@ -73,21 +101,6 @@ def fetch_events():
     except Exception as e:
         log_message(f"Odottamaton virhe tapahtumien haussa: {str(e)}", "ERROR")
         return []
-
-def is_valid_date(event_date):
-    """Tarkistaa että tapahtuma on menneisyydessä (max eilinen)"""
-    try:
-        event_date = datetime.fromisoformat(event_date.replace("Z", "+00:00"))
-        yesterday = datetime.now() - timedelta(days=1)
-        valid = event_date.date() <= yesterday.date()
-        
-        if not valid:
-            log_message(f"Tapahtuma {event_date} on tulevaisuudessa, ohitetaan", "DEBUG")
-        
-        return valid
-    except ValueError as e:
-        log_message(f"Virheellinen päivämäärä {event_date}: {str(e)}", "ERROR")
-        return False
 
 def run_tulosten_haku(event_id):
     """Suorittaa tulosten haun ja palauttaa onnistuiko"""
@@ -157,12 +170,7 @@ def process_event(event):
         log_message(f"Tapahtuma {event_id} ({event_name}) ohitettu - tulevaisuudessa", "DEBUG")
         return
     
-    # 2. Tarkista onko kilpailu JO OLEMASSA tietokannassa
-    if is_already_processed(event_id):
-        log_message(f"Tapahtuma {event_id} ({event_name}) ohitettu - kilpailu on jo tietokannassa", "DEBUG")
-        return
-    
-    # 3. Suorita tulosten haku
+    # 2. Suorita tulosten haku (tapahtumat on jo suodatettu, joten nämä ovat uusia)
     success = False
     error_msg = None
     
@@ -195,18 +203,39 @@ def main():
     try:
         log_message("Aloitetaan automaattihaku")
         
+        # 1. Hae olemassa olevat kilpailu-ID:t tietokannasta
+        existing_ids = get_existing_event_ids()
+        
+        # 2. Hae kaikki tapahtumat rajapinnasta
         events = fetch_events()
         if not events:
             log_message("Ei uusia tapahtumia saatavilla")
-        else:
-            log_message(f"Aloitetaan {len(events)} tapahtuman käsittely")
-            
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                for event in events:
-                    executor.submit(process_event, event)
-            
-            log_message("Kaikki tapahtumat käsitelty")
+            return
         
+        # 3. Suodata vain uudet tapahtumat (ne joita ei ole tietokannassa)
+        new_events = filter_new_events(events, existing_ids)
+        
+        if not new_events:
+            log_message("Ei uusia tapahtumia käsiteltäväksi")
+        else:
+            log_message(f"Löydetty {len(new_events)} uutta tapahtumaa")
+            
+            # 4. Suodata vielä päivämäärän perusteella (vain menneet tapahtumat)
+            valid_events = [event for event in new_events if is_valid_date(event["Date"])]
+            
+            if not valid_events:
+                log_message("Ei kelvollisia uusia tapahtumia käsiteltäväksi")
+            else:
+                log_message(f"Käsitellään {len(valid_events)} kelvollista uutta tapahtumaa")
+                
+                # Käytä ThreadPoolExecutoria rinnakkaista käsittelyä varten
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    for event in valid_events:
+                        executor.submit(process_event, event)
+                
+                log_message("Kaikki uudet tapahtumat käsitelty")
+        
+        # Suorita ikälaskuri aina, vaikka uusia tapahtumia ei olisikaan
         log_message("Aloitetaan ikälaskurin suoritus")
         run_ikalaskuri()
         
