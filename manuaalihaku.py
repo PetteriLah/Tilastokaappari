@@ -1,10 +1,20 @@
 import subprocess
 import time
 import os
-import sqlite3
+import psycopg2
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import requests
+import sys
+
+#sovellus kauhoo oletettuja tapahtuma id numeroita käyttäjän rajaamalta alueelta
+
+# Asetukset
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def get_db_connection():
+    """Luo tietokantayhteyden"""
+    return psycopg2.connect(DATABASE_URL)
 
 def tarkista_tapahtuma_id(tapahtuma_id):
     """Tarkistaa onko tapahtuma jo käsitelty tai onko se olemassa"""
@@ -20,16 +30,12 @@ def tarkista_tapahtuma_id(tapahtuma_id):
         pass  # Jatketaan tietokantatarkistukseen
     
     # Tarkista tietokannasta onko tapahtuma jo käsitelty
-    db_path = os.path.join("data", "kilpailut.db")
-    if not os.path.exists(db_path):
-        return True
-        
     try:
-        conn = sqlite3.connect(db_path)
+        conn = get_db_connection()
         c = conn.cursor()
-        c.execute("SELECT 1 FROM Kilpailut WHERE kilpailu_id = ?", (tapahtuma_id,))
+        c.execute("SELECT 1 FROM Kilpailut WHERE kilpailu_id = %s", (tapahtuma_id,))
         return c.fetchone() is None
-    except sqlite3.Error as e:
+    except psycopg2.Error as e:
         print(f"Tietokantavirhe ID:llä {tapahtuma_id}: {str(e)}")
         return True
     finally:
@@ -46,35 +52,31 @@ def suorita_tulosten_haku(tapahtuma_id, organisaatio_nimi):
 
     try:
         tulos = subprocess.run(
-            ["python", "tulosten_haku.py", "--id", str(tapahtuma_id), "--seura", organisaatio_nimi],
+            [sys.executable, "tulosten_haku.py", "--id", str(tapahtuma_id), "--seura", organisaatio_nimi],
             check=True,
             text=True,
             capture_output=True,
-            timeout=60
+            timeout=120  # 2 minuuttia timeout
         )
         
-        # Tallenna vain jos tuloksia löytyi
-        if "Ei tuloksia" not in tulos.stdout:
-            loki = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - ID: {tapahtuma_id} - Seura: {organisaatio_nimi}\n"
-            loki += f"Tulos: {tulos.stdout}\n"
+        # Tallenna loki riippumatta siitä löytyikö tuloksia vai ei
+        loki = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - ID: {tapahtuma_id} - Seura: {organisaatio_nimi}\n"
+        loki += f"Tulos: {tulos.stdout}\n"
+        
+        with open("tulosten_haku_loki.txt", "a", encoding="utf-8") as f:
+            f.write(loki + "\n")
             
-            with open("tulosten_haku_loki.txt", "a", encoding="utf-8") as f:
-                f.write(loki + "\n")
-                
-            print(f"Tallennettu ID: {tapahtuma_id} (Seura: {organisaatio_nimi})")
-        else:
-            with open("tulosten_haku_eituloksia.txt", "a", encoding="utf-8") as f:
-                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Ei tuloksia ID: {tapahtuma_id}\n")
-            print(f"Ei tuloksia ID:llä {tapahtuma_id}")
+        print(f"Käsitelty ID: {tapahtuma_id} (Seura: {organisaatio_nimi})")
 
     except subprocess.TimeoutExpired:
         with open("tulosten_haku_aikakatkaisut.txt", "a", encoding="utf-8") as f:
             f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Aikakatkaisu ID: {tapahtuma_id}\n")
+        print(f"Aikakatkaisu ID:llä {tapahtuma_id}")
     except subprocess.CalledProcessError as e:
         virhe = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Virhe ID: {tapahtuma_id}"
         
         # Käsittele 404 virheet erikseen
-        if "404 Client Error" in (e.stderr or ""):
+        if "404" in (e.stderr or "") or "Not Found" in (e.stderr or ""):
             with open("tulosten_haku_eiloydy.txt", "a", encoding="utf-8") as f:
                 f.write(f"{virhe} - Tapahtumaa ei löydy\n")
             print(f"Tapahtumaa ei löydy ID:llä {tapahtuma_id}")
@@ -88,6 +90,12 @@ def suorita_tulosten_haku(tapahtuma_id, organisaatio_nimi):
         print(f"Odottamaton virhe ID:llä {tapahtuma_id}")
 
 def main():
+    # Tarkista että tietokantayhteys on saatavilla
+    if not DATABASE_URL:
+        print("VIRHE: DATABASE_URL ympäristömuuttuja puuttuu!")
+        print("Aseta se komennolla: export DATABASE_URL='postgresql://käyttäjä:salasana@osoite/tietokanta'")
+        return
+
     # Kysy käyttäjältä organisaation nimi
     organisaatio_nimi = input("Anna seura, jonka tulokset haetaan: ").strip()
     if not organisaatio_nimi:
@@ -121,8 +129,7 @@ def main():
         "tulosten_haku_virheet.txt",
         "tulosten_haku_eiloydy.txt",
         "tulosten_haku_ohitetut.txt",
-        "tulosten_haku_aikakatkaisut.txt",
-        "tulosten_haku_eituloksia.txt"
+        "tulosten_haku_aikakatkaisut.txt"
     ]:
         with open(tiedosto, "a", encoding="utf-8") as f:
             f.write(f"\n\n=== Uusi ajokerta {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
@@ -133,8 +140,7 @@ def main():
     print(f"\nKäsitellään {len(tapahtuma_idt)} tapahtumaa (ID:t {min_id}-{max_id})")
     print(f"Käytetään {max_workers} säiettä")
     print("Lokitiedot tallennetaan eri tiedostoihin:")
-    print("- tulosten_haku_loki.txt: Onnistuneet haut")
-    print("- tulosten_haku_eituloksia.txt: Tapahtumat ilman tuloksia")
+    print("- tulosten_haku_loki.txt: Kaikki käsitellyt haut")
     print("- tulosten_haku_eiloydy.txt: Tapahtumia joita ei löydy")
     print("- tulosten_haku_ohitetut.txt: Jo käsitellyt tapahtumat")
     print("- tulosten_haku_virheet.txt: Muut virheet")
@@ -144,7 +150,7 @@ def main():
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for tapahtuma_id in tapahtuma_idt:
             executor.submit(suorita_tulosten_haku, tapahtuma_id, organisaatio_nimi)
-            time.sleep(0.5)  # 500ms viive kutsujen välissä
+            time.sleep(0.3)  # 300ms viive kutsujen välissä
 
     print("\nKaikki tapahtumat käsitelty")
 
