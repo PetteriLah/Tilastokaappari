@@ -20,7 +20,7 @@ def get_connection():
     return conn
 
 def init_database():
-    """Alustaa tietokantataulut OIKEILLA sarakenimillä"""
+    """Alustaa tietokantataulut OIKEILLA sarakenimillä JA uniikkirajoitteilla"""
     print("Alustetaan tietokantataulut...")
     
     conn = get_connection()
@@ -37,19 +37,19 @@ def init_database():
         # Luodaan taulut SQLiten mukaisilla sarakenimillä
         cursor.execute("""
             CREATE TABLE Kilpailut (
-                kilpailu_id SERIAL PRIMARY KEY,
+                kilpailu_id INTEGER PRIMARY KEY,
                 kilpailun_nimi VARCHAR(255) NOT NULL,
                 paikkakunta VARCHAR(255),
                 alkupvm DATE,
                 loppupvm DATE,
-                last_updated TIMESTAMP
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
         cursor.execute("""
             CREATE TABLE Seurat (
                 seura_id SERIAL PRIMARY KEY,
-                seura_nimi VARCHAR(255) NOT NULL,
+                seura_nimi VARCHAR(255) NOT NULL UNIQUE,
                 paikkakunta VARCHAR(255),
                 lyhenne VARCHAR(50)
             )
@@ -63,35 +63,39 @@ def init_database():
                 syntymapaiva DATE,
                 syntymavuosi INTEGER,
                 sukupuoli CHAR(1),
-                seura_id INTEGER REFERENCES Seurat(seura_id)
+                seura_id INTEGER REFERENCES Seurat(seura_id),
+                UNIQUE(etunimi, sukunimi)
             )
         """)
         
         cursor.execute("""
             CREATE TABLE Lajit (
-                laji_id SERIAL PRIMARY KEY,
+                laji_id INTEGER,
                 kilpailu_id INTEGER REFERENCES Kilpailut(kilpailu_id),
                 lajin_nimi VARCHAR(255) NOT NULL,
-                sarja VARCHAR(100)
+                sarja VARCHAR(100),
+                PRIMARY KEY (laji_id, kilpailu_id)
             )
         """)
         
         cursor.execute("""
             CREATE TABLE Tulokset (
                 tulos_id SERIAL PRIMARY KEY,
-                laji_id INTEGER REFERENCES Lajit(laji_id),
-                urheilija_id INTEGER REFERENCES Urheilijat(urheilija_id),
+                laji_id INTEGER NOT NULL,
+                kilpailu_id INTEGER NOT NULL,
+                urheilija_id INTEGER NOT NULL REFERENCES Urheilijat(urheilija_id),
                 sijoitus INTEGER,
                 tulos DECIMAL(10,3),
                 reaktioaika DECIMAL(5,2),
                 tuuli DECIMAL(4,2),
                 lisatiedot TEXT,
-                UNIQUE(laji_id, urheilija_id)
+                FOREIGN KEY (laji_id, kilpailu_id) REFERENCES Lajit(laji_id, kilpailu_id),
+                UNIQUE(laji_id, kilpailu_id, urheilija_id)
             )
         """)
         
         conn.commit()
-        print("Tietokantataulut luotu onnistuneesti oikeilla sarakenimillä!")
+        print("Tietokantataulut luotu onnistuneesti oikeilla sarakenimillä ja uniikkirajoitteilla!")
         
     except Exception as e:
         conn.rollback()
