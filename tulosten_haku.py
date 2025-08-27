@@ -234,7 +234,7 @@ def siisti_lajin_nimi(lajin_nimi):
     
     return lajin_nimi.strip()
 
-def save_event_results(conn, competition_id, event_id, event_name, results):
+def save_event_results(conn, competition_id, event_id, event_name, results, seura_filter=None):
     """Tallentaa tulokset tietokantaan"""
     if not conn or not event_id or not event_name:
         return []
@@ -265,17 +265,17 @@ def save_event_results(conn, competition_id, event_id, event_name, results):
                    comp_info['StartDate'],
                    comp_info['EndDate']))
         
-        # 2. Lisää laji (käytä nyt siistittyä nimeä) - TÄMÄ TAPAHTUU AINA
-        c.execute('''INSERT INTO Lajit 
-                     (laji_id, kilpailu_id, lajin_nimi, sarja)
-                     VALUES (%s, %s, %s, %s)
-                     ON CONFLICT (laji_id, kilpailu_id) DO UPDATE SET
-                     lajin_nimi = EXCLUDED.lajin_nimi,
-                     sarja = EXCLUDED.sarja''',
-                  (int(event_id), int(competition_id), str(cleaned_event_name), str(series) if series else None))
-        
-        # 3. Käsitellään tulokset VAIN JOS niitä on
-        if results and isinstance(results, list):
+        # 2. Käsitellään tulokset VAIN JOS niitä on
+        if results and isinstance(results, list) and len(results) > 0:
+            # 3. Lisää laji (käytä nyt siistittyä nimeä) - VAIN JOS TULOKSIA ON
+            c.execute('''INSERT INTO Lajit 
+                         (laji_id, kilpailu_id, lajin_nimi, sarja)
+                         VALUES (%s, %s, %s, %s)
+                         ON CONFLICT (laji_id, kilpailu_id) DO UPDATE SET
+                         lajin_nimi = EXCLUDED.lajin_nimi,
+                         sarja = EXCLUDED.sarja''',
+                      (int(event_id), int(competition_id), str(cleaned_event_name), str(series) if series else None))
+            
             for result in results:
                 if not isinstance(result, dict):
                     continue
@@ -550,10 +550,11 @@ def main():
                     event_results = json.loads(clean_json_response(response.text))
                     
                     event_name, results = parse_results(event_results, args.seura)
-                    # Tallenna tulokset aina, vaikka tuloksia ei olisikaan
-                    athletes = save_event_results(conn, args.id, event_id, event_name, results)
-                    if athletes:
-                        athletes_data.extend(athletes)
+                    # Tallenna tulokset vain jos tuloksia on (eli jos seuralla on edustajia tässä lajissa)
+                    if results and len(results) > 0:
+                        athletes = save_event_results(conn, args.id, event_id, event_name, results, args.seura)
+                        if athletes:
+                            athletes_data.extend(athletes)
                 except Exception as e:
                     print(f"Virhe haettaessa tuloksia lajille {event_name}: {str(e)}", file=sys.stderr)
                     continue
