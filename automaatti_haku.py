@@ -130,7 +130,7 @@ def run_ikalaskuri():
             check=True,
             text=True,
             capture_output=True,
-            timeout=60
+            timeout=500
         )
         
         if result.returncode == 0:
