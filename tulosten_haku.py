@@ -89,8 +89,8 @@ def fetch_competition_info(competition_id):
             return {
                 'Name': comp_data.get('Name', default_info['Name']),
                 'Location': comp_data.get('Location', default_info['Location']),
-                'StartDate': parse_date(competition_date),  # Käytä löydettyä päivämäärää
-                'EndDate': parse_date(competition_date)     # Sama päivä, koska meillä on vain yksi päivä
+                'StartDate': parse_date(competition_date),
+                'EndDate': parse_date(competition_date)
             }
         return default_info
     except Exception as e:
@@ -270,7 +270,7 @@ def siisti_lajin_nimi(lajin_nimi):
     return lajin_nimi.strip()
 
 def save_event_results(conn, competition_id, event_id, event_name, results, seura_filter=None):
-    """Tallentaa tulokset tietokantaan"""
+    """Tallentaa tulokset tietokantaan - päivittää jos on jo olemassa"""
     if not conn or not event_id or not event_name:
         return []
         
@@ -278,66 +278,54 @@ def save_event_results(conn, competition_id, event_id, event_name, results, seur
     series = extract_series_from_event_name(event_name)
     athletes_data = []
     
-    # Siistitään lajin nimi ennen tallennusta
     cleaned_event_name = siisti_lajin_nimi(event_name)
     
     try:
-        # 1. Varmista että kilpailu on olemassa (päivitä myös muut tiedot)
+        # Varmista kilpailu
         save_competition_info(conn, competition_id)
         
-        # 2. Käsitellään tulokset VAIN JOS niitä on
-        if results and isinstance(results, list) and len(results) > 0:
-            # 3. Lisää laji (käytä nyt siistittyä nimeä) - VAIN JOS TULOKSIA ON
-            c.execute('''INSERT INTO Lajit 
-                         (laji_id, kilpailu_id, lajin_nimi, sarja)
-                         VALUES (%s, %s, %s, %s)
-                         ON CONFLICT (laji_id, kilpailu_id) DO UPDATE SET
-                         lajin_nimi = EXCLUDED.lajin_nimi,
-                         sarja = EXCLUDED.sarja''',
-                      (int(event_id), int(competition_id), str(cleaned_event_name), str(series) if series else None))
-            
+        # Lisää/päivitä laji
+        c.execute('''INSERT INTO Lajit 
+                     (laji_id, kilpailu_id, lajin_nimi, sarja)
+                     VALUES (%s, %s, %s, %s)
+                     ON CONFLICT (laji_id, kilpailu_id) DO UPDATE SET
+                     lajin_nimi = EXCLUDED.lajin_nimi,
+                     sarja = EXCLUDED.sarja''',
+                  (int(event_id), int(competition_id), str(cleaned_event_name), str(series) if series else None))
+        
+        if results and isinstance(results, list):
             for result in results:
                 if not isinstance(result, dict):
                     continue
                     
-                # Käsitellään seura
-                seura_nimi = result.get('seura', '-') if result.get('seura', '-') != '-' else None
-                seura_id = None
-                
-                if seura_nimi:
-                    c.execute('''INSERT INTO Seurat (seura_nimi) VALUES (%s) ON CONFLICT (seura_nimi) DO NOTHING''', (str(seura_nimi),))
-                    c.execute('SELECT seura_id FROM Seurat WHERE seura_nimi = %s', (str(seura_nimi),))
-                    seura_row = c.fetchone()
-                    seura_id = int(seura_row[0]) if seura_row and str(seura_row[0]).isdigit() else None
-                
-                # Erotetaan etu- ja sukunimi
-                nimi = str(result.get('nimi', ''))
-                nimet = nimi.split()
-                etunimi = ' '.join(nimet[:-1]) if len(nimet) > 1 else ''
-                sukunimi = nimet[-1] if nimet else ''
-                
-                if not etunimi or not sukunimi:
-                    continue
-                
-                # Tarkista onko urheilija jo olemassa
-                c.execute('SELECT urheilija_id FROM Urheilijat WHERE etunimi = %s AND sukunimi = %s', 
-                         (str(etunimi), str(sukunimi)))
-                existing_athlete = c.fetchone()
-                
-                if existing_athlete:
-                    urheilija_id = int(existing_athlete[0])
-                    # Päivitä urheilijan tiedot jos uusia tietoja on saatavilla
-                    c.execute('''UPDATE Urheilijat SET
-                                sukupuoli = COALESCE(%s, sukupuoli),
-                                syntymavuosi = COALESCE(%s, syntymavuosi),
-                                seura_id = COALESCE(%s, seura_id)
-                                WHERE urheilija_id = %s''',
-                             (str(result.get('sukupuoli')) if result.get('sukupuoli') else None,
-                              int(result.get('syntymavuosi')) if str(result.get('syntymavuosi', '')).isdigit() else None,
-                              int(seura_id) if seura_id else None,
-                              urheilija_id))
-                else:
-                    # Lisää uusi urheilija
+                try:
+                    # Käytä SAVEPOINT:iä jokaisen urheilijan kohdalla
+                    c.execute("SAVEPOINT sp_athlete")
+                    
+                    # Käsittele seura
+                    seura_nimi = result.get('seura', '-')
+                    seura_id = None
+                    if seura_nimi and seura_nimi != '-':
+                        c.execute('''INSERT INTO Seurat (seura_nimi) VALUES (%s) 
+                                     ON CONFLICT (seura_nimi) DO NOTHING''', 
+                                 (str(seura_nimi),))
+                        c.execute('SELECT seura_id FROM Seurat WHERE seura_nimi = %s', 
+                                 (str(seura_nimi),))
+                        row = c.fetchone()
+                        if row:
+                            seura_id = int(row[0])
+                    
+                    # Nimi
+                    nimi = str(result.get('nimi', ''))
+                    nimet = nimi.split()
+                    etunimi = ' '.join(nimet[:-1]) if len(nimet) > 1 else ''
+                    sukunimi = nimet[-1] if nimet else ''
+                    
+                    if not etunimi or not sukunimi:
+                        c.execute("ROLLBACK TO SAVEPOINT sp_athlete")
+                        continue
+                    
+                    # Urheilija - käytä ON CONFLICT DO UPDATE
                     c.execute('''INSERT INTO Urheilijat 
                                  (etunimi, sukunimi, sukupuoli, syntymavuosi, seura_id)
                                  VALUES (%s, %s, %s, %s, %s)
@@ -346,49 +334,58 @@ def save_event_results(conn, competition_id, event_id, event_name, results, seur
                                  syntymavuosi = COALESCE(EXCLUDED.syntymavuosi, Urheilijat.syntymavuosi),
                                  seura_id = COALESCE(EXCLUDED.seura_id, Urheilijat.seura_id)
                                  RETURNING urheilija_id''',
-                              (str(etunimi), str(sukunimi), 
+                              (str(etunimi), str(sukunimi),
                                str(result.get('sukupuoli')) if result.get('sukupuoli') else None,
                                int(result.get('syntymavuosi')) if str(result.get('syntymavuosi', '')).isdigit() else None,
                                int(seura_id) if seura_id else None))
                     
                     urheilija_row = c.fetchone()
-                    urheilija_id = int(urheilija_row[0]) if urheilija_row and str(urheilija_row[0]).isdigit() else None
-                
-                if not urheilija_id:
-                    print(f"Virhe: Urheilijaa ei löytynyt: {etunimi} {sukunimi}", file=sys.stderr)
-                    continue
+                    urheilija_id = int(urheilija_row[0]) if urheilija_row else None
                     
-                # Lisää tulos
-                try:
+                    if not urheilija_id:
+                        c.execute("ROLLBACK TO SAVEPOINT sp_athlete")
+                        continue
+                    
+                    # TÄRKEIN: Tarkista onko tulos jo olemassa
+                    # Jos on, DELETE ja sitten INSERT (ei UPDATE)
+                    c.execute('''DELETE FROM Tulokset 
+                                 WHERE laji_id = %s AND kilpailu_id = %s AND urheilija_id = %s''',
+                              (int(event_id), int(competition_id), int(urheilija_id)))
+                    
+                    # Nyt INSERT uutena (ei duplikaattivirhettä)
                     c.execute('''INSERT INTO Tulokset 
                                  (laji_id, kilpailu_id, urheilija_id, sijoitus, tulos, lisatiedot)
-                                 VALUES (%s, %s, %s, %s, %s, %s)
-                                 ON CONFLICT (laji_id, kilpailu_id, urheilija_id) DO UPDATE SET
-                                 sijoitus = EXCLUDED.sijoitus,
-                                 tulos = EXCLUDED.tulos,
-                                 lisatiedot = EXCLUDED.lisatiedot''',
-                              (int(event_id), int(competition_id), int(urheilija_id), 
+                                 VALUES (%s, %s, %s, %s, %s, %s)''',
+                              (int(event_id), int(competition_id), int(urheilija_id),
                                int(result.get('sijoitus', 0)) if str(result.get('sijoitus', '0')).isdigit() else 0,
                                float(result.get('tulos')) if result.get('tulos') is not None else None,
                                str(result.get('tulos_teksti', ''))))
-                except (psycopg2.IntegrityError, ValueError) as e:
-                    print(f"Virhe tuloksen lisäämisessä (laji_id={event_id}, urheilija_id={urheilija_id}): {str(e)}", file=sys.stderr)
+                    
+                    athletes_data.append({
+                        'id': urheilija_id,
+                        'name': f"{etunimi} {sukunimi}",
+                        'series': series
+                    })
+                    
+                    # Poista savepoint
+                    c.execute("RELEASE SAVEPOINT sp_athlete")
+                    
+                except Exception as e:
+                    # Rollback vain tämän urheilijan muutokset
+                    c.execute("ROLLBACK TO SAVEPOINT sp_athlete")
+                    print(f"Virhe tallennettaessa urheilijaa {etunimi} {sukunimi}: {str(e)}", file=sys.stderr)
                     continue
-                
-                athletes_data.append({
-                    'id': urheilija_id,
-                    'name': f"{etunimi} {sukunimi}",
-                    'series': series
-                })
         
         conn.commit()
-    
+        return athletes_data
+        
     except Exception as e:
         conn.rollback()
         print(f"Virhe tallennettaessa tuloksia: {str(e)}", file=sys.stderr)
-    
-    return athletes_data
-    
+        import traceback
+        traceback.print_exc()
+        return []
+
 def print_results_by_series(conn, competition_id, seura_filter=None):
     """Tulostaa tulokset ryhmiteltynä sarjoittain"""
     if not conn:
@@ -397,54 +394,35 @@ def print_results_by_series(conn, competition_id, seura_filter=None):
     c = conn.cursor()
     
     try:
-        # Hae kilpailun tiedot - KORJATTU: Lisätty sarakkeiden nimet
+        # Hae kilpailun tiedot
         c.execute('''SELECT kilpailun_nimi, paikkakunta, alkupvm, loppupvm
                      FROM Kilpailut WHERE kilpailu_id = %s''', (int(competition_id),))
         competition_row = c.fetchone()
         
-
-        
-        # Jos tietoja ei ole tietokannassa, hae API:sta
-        if not competition_row or not competition_row[2] or not competition_row[3]:
-            comp_info = fetch_competition_info(competition_id)
-            competition_name = comp_info['Name']
-            location = comp_info['Location']
-            start_date = comp_info['StartDate']
-            end_date = comp_info['EndDate']
-            
-            # Päivitä tietokanta
-            c.execute('''UPDATE Kilpailut 
-                         SET kilpailun_nimi = %s, paikkakunta = %s, alkupvm = %s,  = %s
-                         WHERE kilpailu_id = %s''',
-                      (str(competition_name), str(location) if location else None,
-                       start_date, 
-                       end_date,
-                       int(competition_id)))
-            conn.commit()
-        else:
+        if competition_row:
             competition_name, location, start_date, end_date = competition_row
-        
-        # Muotoile päivämäärät
-        date_info = ""
-        if start_date:
-            try:
-                start_dt = datetime.strptime(str(start_date), '%Y-%m-%d')
-                start_str = start_dt.strftime('%d.%m.%Y')
-                if end_date and end_date != start_date:
-                    end_dt = datetime.strptime(str(end_date), '%Y-%m-%d')
-                    end_str = end_dt.strftime('%d.%m.%Y')
-                    date_info = f" - {start_str}-{end_str}"
-                else:
-                    date_info = f" - {start_str}"
-            except:
-                date_info = ""
-        
-        print(f"\n{'='*50}")
-        if seura_filter:
-            print(f"TULOKSET - {competition_name}{f' ({location})' if location else ''}{date_info}")
-            print(f"Seura: {seura_filter}")
-        else:
-            print(f"TULOKSET - {competition_name}{f' ({location})' if location else ''}{date_info} (kaikki seurat)")
+            
+            # Muotoile päivämäärät
+            date_info = ""
+            if start_date:
+                try:
+                    start_dt = datetime.strptime(str(start_date), '%Y-%m-%d')
+                    start_str = start_dt.strftime('%d.%m.%Y')
+                    if end_date and end_date != start_date:
+                        end_dt = datetime.strptime(str(end_date), '%Y-%m-%d')
+                        end_str = end_dt.strftime('%d.%m.%Y')
+                        date_info = f" - {start_str}-{end_str}"
+                    else:
+                        date_info = f" - {start_str}"
+                except:
+                    date_info = ""
+            
+            print(f"\n{'='*50}")
+            if seura_filter:
+                print(f"TULOKSET - {competition_name}{f' ({location})' if location else ''}{date_info}")
+                print(f"Seura: {seura_filter}")
+            else:
+                print(f"TULOKSET - {competition_name}{f' ({location})' if location else ''}{date_info} (kaikki seurat)")
         
         # Hae lajit ja sarjat
         query = '''SELECT DISTINCT l.laji_id, l.lajin_nimi, l.sarja 
@@ -480,12 +458,12 @@ def print_results_by_series(conn, competition_id, seura_filter=None):
                        FROM Tulokset t
                        JOIN Urheilijat u ON t.urheilija_id = u.urheilija_id
                        LEFT JOIN Seurat s ON u.seura_id = s.seura_id
-                       WHERE t.laji_id = %s'''
-            params = (int(event_id),)
+                       WHERE t.laji_id = %s AND t.kilpailu_id = %s'''
+            params = (int(event_id), int(competition_id))
             
             if seura_filter:
                 query += ' AND s.seura_nimi = %s'
-                params = (int(event_id), str(seura_filter))
+                params = (int(event_id), int(competition_id), str(seura_filter))
             
             query += ' ORDER BY t.sijoitus'
             
@@ -518,7 +496,7 @@ def main():
         conn = get_db_connection()
         print(f"Tietokanta sijaitsee: {DATABASE_URL}", file=sys.stderr)
         
-        # TALLENNA KILPAILUN TIEDOT AINA (uusi rivi)
+        # TALLENNA KILPAILUN TIEDOT AINA
         save_competition_info(conn, args.id)
         
         # Hae kilpailun tiedot
@@ -542,6 +520,7 @@ def main():
             )
             response.raise_for_status()
             competition_rounds = json.loads(clean_json_response(response.text))
+            print(f"\nAPI vastaus kilpailulle {args.id}:")
         except Exception as e:
             print(f"Virhe kilpailun kierrosten haussa: {str(e)}", file=sys.stderr)
             sys.exit(1)
@@ -550,7 +529,29 @@ def main():
             print("Virhe: Kilpailun kierrosten data on virheellisessä muodossa", file=sys.stderr)
             sys.exit(1)
         
+        # Laske kierrokset
+        total_rounds = 0
+        for date_str, rounds in competition_rounds.items():
+            if date_str == "Competition" or not isinstance(rounds, list):
+                continue
+            total_rounds += len(rounds)
+        
+        print(f"Päivä: {list(competition_rounds.keys())[1] if len(competition_rounds) > 1 else 'Ei päivämäärää'}")
+        for date_str, rounds in competition_rounds.items():
+            if date_str == "Competition" or not isinstance(rounds, list):
+                continue
+            for i, round_data in enumerate(rounds, 1):
+                if isinstance(round_data, dict):
+                    event_id = round_data.get('EventId')
+                    event_name = round_data.get('EventName', 'Tuntematon laji')
+                    status = round_data.get('Status', 'Unknown')
+                    print(f"  Kierros {i}: {event_name} (ID: {event_id}, Status: {status})")
+        
+        print(f"\nYhteensä {total_rounds} kierrosta löytyi API:sta\n")
+        
         athletes_data = []
+        lajit_käsitelty = 0
+        
         for date_str, rounds in competition_rounds.items():
             if date_str == "Competition" or not isinstance(rounds, list):
                 continue
@@ -564,6 +565,8 @@ def main():
                 
                 if not event_id:
                     continue
+                
+                print(f"Käsitellään lajia: {event_name} (ID: {event_id}, Status: Official)")
                     
                 # Hae tapahtuman tulokset
                 try:
@@ -575,14 +578,21 @@ def main():
                     event_results = json.loads(clean_json_response(response.text))
                     
                     event_name, results = parse_results(event_results, args.seura)
-                    # Tallenna tulokset vain jos tuloksia on (eli jos seuralla on edustajia tässä lajissa)
+                    
                     if results and len(results) > 0:
+                        print(f"  Löytyi {len(results)} tulosta seuralle {args.seura if args.seura else 'kaikki'}")
                         athletes = save_event_results(conn, args.id, event_id, event_name, results, args.seura)
                         if athletes:
                             athletes_data.extend(athletes)
+                            lajit_käsitelty += 1
+                    else:
+                        print(f"  Ei tuloksia seuralle {args.seura if args.seura else 'kaikki'}")
+                        
                 except Exception as e:
-                    print(f"Virhe haettaessa tuloksia lajille {event_name}: {str(e)}", file=sys.stderr)
+                    print(f"  Virhe haettaessa tuloksia: {str(e)}", file=sys.stderr)
                     continue
+        
+        print(f"\nKäsitelty yhteensä {lajit_käsitelty} lajia")
         
         # Tulosta tulokset
         print_results_by_series(conn, args.id, args.seura)
@@ -591,6 +601,8 @@ def main():
         
     except Exception as e:
         print(f"\nVIRHE: {str(e)}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     finally:
         if 'conn' in locals():
